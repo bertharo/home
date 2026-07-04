@@ -69,14 +69,12 @@ In **Authentication → Users → Add user**, create the two members (use "Auto 
 A matching `profiles` row is created automatically by the DB trigger (first user is
 blue, second is pink — adjust names/colors later in the `profiles` table if you like).
 
-Then set the allowlist in `.env.local`:
+That's it for access control — sign-in uses `shouldCreateUser: false`, so **only
+users you create in Supabase can ever log in** (no public signup).
 
-```
-ALLOWED_EMAILS=you@example.com,partner@example.com
-```
-
-> Sign-in is enforced two ways: the magic link only works for existing users, and
-> the callback rejects any email not in `ALLOWED_EMAILS`.
+> Optional extra layer: set `ALLOWED_EMAILS=a@x.com,b@y.com` to also restrict
+> sign-in to specific emails. If you leave it unset, the app simply trusts
+> Supabase's user list.
 
 ### Email redirect URLs
 

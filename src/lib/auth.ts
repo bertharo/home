@@ -12,8 +12,10 @@ export function allowedEmails(): string[] {
 
 export function isAllowedEmail(email: string) {
   const list = allowedEmails();
-  // If no allowlist configured, fail closed rather than open.
-  if (list.length === 0) return false;
+  // The real gate is manual user provisioning in Supabase (sign-in uses
+  // shouldCreateUser:false, so no one can self-register). The allowlist is an
+  // OPTIONAL extra layer — if it's unset, trust Supabase's user list.
+  if (list.length === 0) return true;
   return list.includes(email.trim().toLowerCase());
 }
 
