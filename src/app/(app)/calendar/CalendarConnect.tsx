@@ -41,7 +41,7 @@ export function CalendarConnect({
 
   const errorMessage =
     error === "no-refresh"
-      ? "Google didn't return a refresh token. Remove Home Hub from your Google account permissions and reconnect."
+      ? "Google didn't return a refresh token. Remove Home from your Google account permissions and reconnect."
       : error === "not-configured"
         ? "Google Calendar isn't configured on the server yet."
         : error

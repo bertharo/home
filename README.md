@@ -1,4 +1,4 @@
-# Home Hub
+# Home
 
 A private, two-person web app for running a household — budget, calendar, to-dos,
 chores, groceries, pickups, annual goals, and a shared vacation idea board.

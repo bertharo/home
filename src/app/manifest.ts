@@ -4,7 +4,7 @@ import { APP_NAME } from "@/lib/constants";
 export default function manifest(): MetadataRoute.Manifest {
   return {
     name: APP_NAME,
-    short_name: "Home Hub",
+    short_name: "Home",
     description: "A calm, private hub for running our household.",
     start_url: "/",
     display: "standalone",

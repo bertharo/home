@@ -22,7 +22,7 @@ export default function LoginPage() {
       return "Wrong email or password.";
     }
     if (m.includes("signups not allowed") || m.includes("not found")) {
-      return "That email isn't set up for Home Hub.";
+      return "That email isn't set up for Home.";
     }
     if (m.includes("rate limit")) {
       return "Too many email requests — try password sign-in, or wait a bit.";

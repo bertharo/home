@@ -1,5 +1,5 @@
 -- ===========================================================================
--- Home Hub — Postgres schema (run in Supabase SQL editor)
+-- Home — Postgres schema (run in Supabase SQL editor)
 -- ---------------------------------------------------------------------------
 -- Model notes:
 -- * Exactly two users share ALL data (a household). RLS therefore grants any

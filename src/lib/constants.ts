@@ -11,7 +11,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 
-export const APP_NAME = "Home Hub";
+export const APP_NAME = "Home";
 
 export type NavItem = {
   href: string;

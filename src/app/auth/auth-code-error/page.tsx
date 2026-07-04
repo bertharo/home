@@ -17,7 +17,7 @@ export default async function AuthCodeError({
       </h1>
       <p className="mt-2 max-w-sm text-sm text-neutral-500">
         {notAllowed
-          ? "This email isn't one of the two Home Hub members. If that's a mistake, check the allowlist."
+          ? "This email isn't one of the two Home members. If that's a mistake, check the allowlist."
           : "That magic link is no longer valid. Request a fresh one to sign in."}
       </p>
       <Link

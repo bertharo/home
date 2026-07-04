@@ -1,4 +1,4 @@
-// Home Hub service worker.
+// Home service worker.
 // Intentionally conservative: this app is data-driven and auth-gated, so we
 // only cache immutable build assets (cache-first) and always hit the network
 // for pages and API/data requests. This keeps the PWA installable + snappy
