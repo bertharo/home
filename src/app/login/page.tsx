@@ -5,14 +5,53 @@ import { createClient } from "@/lib/supabase/client";
 import { APP_NAME } from "@/lib/constants";
 import { Home, Loader2, MailCheck } from "lucide-react";
 
+type Mode = "password" | "magic";
+
 export default function LoginPage() {
+  const [mode, setMode] = useState<Mode>("password");
   const [email, setEmail] = useState("");
-  const [status, setStatus] = useState<"idle" | "sending" | "sent" | "error">(
-    "idle",
-  );
+  const [password, setPassword] = useState("");
+  const [status, setStatus] = useState<
+    "idle" | "sending" | "sent" | "error"
+  >("idle");
   const [message, setMessage] = useState<string | null>(null);
 
-  async function handleSubmit(e: React.FormEvent) {
+  function friendlyError(raw: string): string {
+    const m = raw.toLowerCase();
+    if (m.includes("invalid login credentials")) {
+      return "Wrong email or password.";
+    }
+    if (m.includes("signups not allowed") || m.includes("not found")) {
+      return "That email isn't set up for Home Hub.";
+    }
+    if (m.includes("rate limit")) {
+      return "Too many email requests — try password sign-in, or wait a bit.";
+    }
+    return raw;
+  }
+
+  async function handlePassword(e: React.FormEvent) {
+    e.preventDefault();
+    setStatus("sending");
+    setMessage(null);
+
+    const supabase = createClient();
+    const { error } = await supabase.auth.signInWithPassword({
+      email: email.trim().toLowerCase(),
+      password,
+    });
+
+    if (error) {
+      setStatus("error");
+      setMessage(friendlyError(error.message));
+      return;
+    }
+
+    // Full navigation so the server picks up the fresh session cookie.
+    window.location.assign("/");
+  }
+
+  async function handleMagic(e: React.FormEvent) {
     e.preventDefault();
     setStatus("sending");
     setMessage(null);
@@ -32,16 +71,17 @@ export default function LoginPage() {
 
     if (error) {
       setStatus("error");
-      setMessage(
-        error.message.toLowerCase().includes("signups not allowed") ||
-          error.message.toLowerCase().includes("not found")
-          ? "That email isn't set up for Home Hub."
-          : error.message,
-      );
+      setMessage(friendlyError(error.message));
       return;
     }
 
     setStatus("sent");
+  }
+
+  function switchMode(next: Mode) {
+    setMode(next);
+    setStatus("idle");
+    setMessage(null);
   }
 
   return (
@@ -71,15 +111,15 @@ export default function LoginPage() {
               Open it on this device to stay signed in.
             </p>
             <button
-              onClick={() => setStatus("idle")}
+              onClick={() => switchMode("password")}
               className="mt-4 text-sm font-medium text-neutral-500 underline underline-offset-4"
             >
-              Use a different email
+              Back to sign in
             </button>
           </div>
         ) : (
           <form
-            onSubmit={handleSubmit}
+            onSubmit={mode === "password" ? handlePassword : handleMagic}
             className="rounded-2xl border border-neutral-200 bg-white p-6 shadow-sm"
           >
             <label
@@ -100,6 +140,27 @@ export default function LoginPage() {
               className="w-full rounded-xl border border-neutral-300 bg-white px-4 py-3 text-base text-neutral-900 outline-none transition focus:border-neutral-900 focus:ring-2 focus:ring-neutral-900/10"
             />
 
+            {mode === "password" && (
+              <>
+                <label
+                  htmlFor="password"
+                  className="mb-1.5 mt-4 block text-sm font-medium text-neutral-700"
+                >
+                  Password
+                </label>
+                <input
+                  id="password"
+                  type="password"
+                  required
+                  autoComplete="current-password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="••••••••"
+                  className="w-full rounded-xl border border-neutral-300 bg-white px-4 py-3 text-base text-neutral-900 outline-none transition focus:border-neutral-900 focus:ring-2 focus:ring-neutral-900/10"
+                />
+              </>
+            )}
+
             {message && (
               <p className="mt-2 text-sm text-red-600">{message}</p>
             )}
@@ -111,12 +172,28 @@ export default function LoginPage() {
             >
               {status === "sending" ? (
                 <>
-                  <Loader2 className="h-4 w-4 animate-spin" /> Sending…
+                  <Loader2 className="h-4 w-4 animate-spin" />{" "}
+                  {mode === "password" ? "Signing in…" : "Sending…"}
                 </>
+              ) : mode === "password" ? (
+                "Sign in"
               ) : (
                 "Send magic link"
               )}
             </button>
+
+            <button
+              type="button"
+              onClick={() =>
+                switchMode(mode === "password" ? "magic" : "password")
+              }
+              className="mt-3 w-full text-center text-sm font-medium text-neutral-500 underline underline-offset-4"
+            >
+              {mode === "password"
+                ? "Email me a magic link instead"
+                : "Sign in with a password instead"}
+            </button>
+
             <p className="mt-3 text-center text-xs text-neutral-400">
               Private household app. Sign-in is limited to invited members.
             </p>
