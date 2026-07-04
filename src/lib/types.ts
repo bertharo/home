@@ -63,40 +63,31 @@ export type PickupDuty = {
   created_at: string;
 };
 
-export type TransactionType = "income" | "expense";
-export type CategoryKind = "fixed" | "variable" | "savings" | "income";
+// Budget — spreadsheet-style monthly cash flow.
+export type BudgetLineKind = "expense" | "revenue";
 
-export type Transaction = {
+export type BudgetLine = {
   id: string;
-  type: TransactionType;
-  amount: number;
-  category: string;
-  description: string | null;
-  txn_date: string; // YYYY-MM-DD
-  created_by: string;
-  created_at: string;
-};
-
-export type RecurringTransaction = {
-  id: string;
-  type: TransactionType;
-  amount: number;
-  category: string;
-  description: string | null;
-  recurrence: Recurrence;
-  day_of_month: number | null; // for monthly items
-  active: boolean;
-  created_by: string;
-  created_at: string;
-};
-
-export type BudgetCategory = {
-  id: string;
+  kind: BudgetLineKind;
   name: string;
-  kind: CategoryKind;
-  monthly_budget: number;
+  sort_order: number;
   created_by: string;
   created_at: string;
+};
+
+export type BudgetAmount = {
+  id: string;
+  line_id: string;
+  month: string; // YYYY-MM-DD (first day of the month)
+  amount: number;
+  updated_at: string;
+};
+
+export type BudgetMeta = {
+  id: boolean; // always true (singleton)
+  start_month: string; // YYYY-MM-DD
+  starting_balance: number;
+  updated_at: string;
 };
 
 export type Goal = {

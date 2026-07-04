@@ -1,135 +1,109 @@
-import type {
-  Transaction,
-  RecurringTransaction,
-  Recurrence,
-} from "@/lib/types";
-import { monthKey, shiftMonth } from "@/lib/utils";
-
-/** Convert a recurring amount to its monthly-equivalent value. */
-export function monthlyEquivalent(amount: number, recurrence: Recurrence) {
-  switch (recurrence) {
-    case "daily":
-      return (amount * 365) / 12;
-    case "weekly":
-      return (amount * 52) / 12;
-    case "biweekly":
-      return (amount * 26) / 12;
-    case "monthly":
-      return amount;
-    case "yearly":
-      return amount / 12;
-    default:
-      return amount;
-  }
-}
-
-export type MonthSummary = {
-  income: number;
-  expense: number;
-  savings: number; // portion of expense flagged as Savings/Investing
-  net: number;
-  byCategory: Record<string, number>; // expense totals per category
-};
-
-const SAVINGS_CATEGORIES = new Set(["Savings", "Investing"]);
-
-export function summarizeMonth(
-  transactions: Transaction[],
-  month: string,
-): MonthSummary {
-  let income = 0;
-  let expense = 0;
-  let savings = 0;
-  const byCategory: Record<string, number> = {};
-
-  for (const t of transactions) {
-    if (t.txn_date.slice(0, 7) !== month) continue;
-    const amt = Number(t.amount);
-    if (t.type === "income") {
-      income += amt;
-    } else {
-      expense += amt;
-      byCategory[t.category] = (byCategory[t.category] ?? 0) + amt;
-      if (SAVINGS_CATEGORIES.has(t.category)) savings += amt;
-    }
-  }
-
-  return { income, expense, savings, net: income - expense, byCategory };
-}
-
-/** Total expense per month, for the given list of month keys. */
-export function expenseByMonth(
-  transactions: Transaction[],
-  months: string[],
-): { month: string; expense: number; income: number }[] {
-  return months.map((m) => {
-    const s = summarizeMonth(transactions, m);
-    return { month: m, expense: s.expense, income: s.income };
-  });
-}
-
-export type Forecast = {
-  total: number;
-  recurringTotal: number;
-  variableTotal: number;
-  variableByCategory: { category: string; avg: number }[];
-  basedOnMonths: string[];
-};
+import type { BudgetLine, BudgetAmount, BudgetMeta } from "@/lib/types";
+import { shiftMonth, monthKey } from "@/lib/utils";
 
 /**
- * Project next month's spend:
- *   recurring monthly-equivalent expenses
- *   + trailing 3-month average for variable (non-recurring) categories.
- * Categories that already have a recurring entry are excluded from the
- * variable average to avoid double counting.
+ * One month of the cash-flow model.
+ *   remaining = begBalance + totalRevenue - totalExpenses
+ *   next month's begBalance = this month's remaining
  */
-export function buildForecast(
-  transactions: Transaction[],
-  recurring: RecurringTransaction[],
-  currentMonth: string,
-): Forecast {
-  const recurringExpenses = recurring.filter(
-    (r) => r.type === "expense" && r.active,
-  );
-  const recurringTotal = recurringExpenses.reduce(
-    (sum, r) => sum + monthlyEquivalent(Number(r.amount), r.recurrence),
-    0,
-  );
-  const recurringCategories = new Set(recurringExpenses.map((r) => r.category));
+export type BudgetMonth = {
+  month: string; // YYYY-MM
+  begBalance: number;
+  totalRevenue: number;
+  totalExpenses: number;
+  remaining: number;
+};
 
-  const trailing = [1, 2, 3].map((n) => shiftMonth(currentMonth, -n + 1));
-  // trailing = [currentMonth, prev, prev2] -> last 3 months incl current
+type Totals = { revenue: number; expenses: number };
 
-  const perCategoryTotals: Record<string, number> = {};
-  for (const m of trailing) {
-    const s = summarizeMonth(transactions, m);
-    for (const [cat, amt] of Object.entries(s.byCategory)) {
-      if (recurringCategories.has(cat)) continue;
-      perCategoryTotals[cat] = (perCategoryTotals[cat] ?? 0) + amt;
-    }
+/** Sum amounts into { revenue, expenses } per "YYYY-MM". */
+function totalsByMonth(
+  amounts: BudgetAmount[],
+  lines: BudgetLine[],
+): Map<string, Totals> {
+  const kindById = new Map(lines.map((l) => [l.id, l.kind]));
+  const map = new Map<string, Totals>();
+  for (const a of amounts) {
+    const kind = kindById.get(a.line_id);
+    if (!kind) continue;
+    const mk = a.month.slice(0, 7);
+    const cur = map.get(mk) ?? { revenue: 0, expenses: 0 };
+    if (kind === "revenue") cur.revenue += Number(a.amount);
+    else cur.expenses += Number(a.amount);
+    map.set(mk, cur);
   }
-
-  const variableByCategory = Object.entries(perCategoryTotals)
-    .map(([category, total]) => ({ category, avg: total / trailing.length }))
-    .filter((c) => c.avg > 0)
-    .sort((a, b) => b.avg - a.avg);
-
-  const variableTotal = variableByCategory.reduce((s, c) => s + c.avg, 0);
-
-  return {
-    total: recurringTotal + variableTotal,
-    recurringTotal,
-    variableTotal,
-    variableByCategory,
-    basedOnMonths: trailing,
-  };
+  return map;
 }
 
-/** The last N month keys ending at (and including) `month`, oldest first. */
-export function trailingMonths(month: string, n: number): string[] {
+/** Inclusive list of "YYYY-MM" keys from `from` to `to` (oldest first). */
+function monthRange(from: string, to: string): string[] {
   const out: string[] = [];
-  for (let i = n - 1; i >= 0; i--) out.push(shiftMonth(month, -i));
+  let cursor = from;
+  // Safety cap: never loop more than ~50 years of months.
+  for (let i = 0; i < 600 && cursor <= to; i++) {
+    out.push(cursor);
+    cursor = shiftMonth(cursor, 1);
+  }
   return out;
+}
+
+/**
+ * Build the running cash-flow series ending at `targetMonth`, plus the
+ * `targetMonth` snapshot. Balances accumulate from the opening balance set in
+ * `meta` (defaulting to the target month with a zero opening balance).
+ */
+export function buildBudgetView(
+  amounts: BudgetAmount[],
+  lines: BudgetLine[],
+  meta: BudgetMeta | null,
+  targetMonth: string,
+  trailing = 6,
+): { current: BudgetMonth; series: BudgetMonth[]; startMonth: string } {
+  const totals = totalsByMonth(amounts, lines);
+  const startingBalance = Number(meta?.starting_balance ?? 0);
+  const startMonth = meta?.start_month
+    ? meta.start_month.slice(0, 7)
+    : targetMonth;
+
+  // Compute from the earliest of (start month, first trailing month we want to
+  // display) so every month in the trend has a running balance.
+  const firstTrailing = shiftMonth(targetMonth, -(trailing - 1));
+  const from = startMonth < firstTrailing ? startMonth : firstTrailing;
+  const to = targetMonth < startMonth ? startMonth : targetMonth;
+
+  const byMonth = new Map<string, BudgetMonth>();
+  let running = startingBalance;
+  for (const m of monthRange(from, to)) {
+    const t = totals.get(m) ?? { revenue: 0, expenses: 0 };
+    const begBalance = running;
+    const remaining = begBalance + t.revenue - t.expenses;
+    byMonth.set(m, {
+      month: m,
+      begBalance,
+      totalRevenue: t.revenue,
+      totalExpenses: t.expenses,
+      remaining,
+    });
+    running = remaining;
+  }
+
+  const zero = (m: string): BudgetMonth => ({
+    month: m,
+    begBalance: startingBalance,
+    totalRevenue: 0,
+    totalExpenses: 0,
+    remaining: startingBalance,
+  });
+
+  const current = byMonth.get(targetMonth) ?? zero(targetMonth);
+
+  const series: BudgetMonth[] = [];
+  for (let i = trailing - 1; i >= 0; i--) {
+    const m = shiftMonth(targetMonth, -i);
+    series.push(byMonth.get(m) ?? zero(m));
+  }
+
+  return { current, series, startMonth };
 }
 
 export const currentMonthKey = () => monthKey();

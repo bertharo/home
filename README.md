@@ -20,7 +20,7 @@ Storage), **Tailwind CSS v4**, the **Google Calendar API**, and deployed on
 | **Grocery** | Fast quick-add, check off as you shop, grouped by store section. |
 | **Pickups & duties** | Lightweight weekly schedule of who's covering what, which day. |
 | **Calendar** | Two-way Google Calendar sync for both people, unified color-coded view, month + week, and "family events" that write to both calendars. |
-| **Budget** | Manual entry, categories, recurring transactions, spend-vs-budget bars, 6-month trend, and a next-month projection (recurring items + trailing 3-month variable average). |
+| **Budget** | Spreadsheet-style monthly cash flow: expense & revenue line items you edit inline, auto-computed Total Expenses / Total Revenue, a Beginning Balance that carries over from the prior month's remaining balance, Total Remaining Balance, and a cash-flow chart across months. |
 | **Goals** | Individual + joint annual goals with status and progress notes; stale goals surface on the dashboard. |
 | **Trip ideas** | Shared idea board with status (idea→researching→planned→booked), rough cost/timing, links, and photo uploads. |
 
@@ -148,9 +148,10 @@ Screen**. It runs full-screen as a PWA and keeps you signed in.
   view reads both members' tokens via a service-role client (server-only),
   refreshing/persisting access tokens automatically. "Family events" are written
   to every connected calendar and tagged so they can be labeled in-app.
-- **Budget forecast**: `src/lib/budget.ts` computes the projection as
-  monthly-equivalent recurring expenses + trailing 3-month average of non-recurring
-  ("variable") categories, deliberately framed as a projection, not a guarantee.
+- **Budget cash flow**: `src/lib/budget.ts` sums each month's expense and revenue
+  line items, then walks forward from an opening balance so every month's
+  Beginning Balance = the prior month's Total Remaining Balance
+  (`remaining = beginning + revenue − expenses`).
 
 ## Project structure
 
@@ -169,7 +170,7 @@ src/
   lib/
     supabase/         # client / server / admin / middleware helpers
     google.ts         # Calendar API integration
-    budget.ts         # Budget math + forecast
+    budget.ts         # Monthly cash-flow math
     auth.ts, types.ts, constants.ts, utils.ts
   proxy.ts            # Session refresh + route protection
 supabase/schema.sql   # Full database schema + RLS + storage bucket

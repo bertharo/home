@@ -115,43 +115,43 @@ create table if not exists public.pickup_duties (
 );
 
 -- ---------------------------------------------------------------------------
--- Budget: transactions, recurring transactions, category budgets
+-- Budget: spreadsheet-style monthly cash flow.
+--   * budget_lines  = the row labels (each an expense or a revenue item)
+--   * budget_amounts = one value per line per month
+--   * budget_meta   = singleton: the starting month + opening balance.
+-- Derived per month:
+--   Total Expenses          = sum of expense-line amounts
+--   Total Revenue           = sum of revenue-line amounts
+--   Beginning Balance       = opening balance (start month) OR prior month's
+--                             Total Remaining Balance
+--   Total Remaining Balance = Beginning Balance + Total Revenue - Total Expenses
 -- ---------------------------------------------------------------------------
-create table if not exists public.transactions (
-  id          uuid primary key default gen_random_uuid(),
-  type        text not null check (type in ('income','expense')),
-  amount      numeric(12,2) not null check (amount >= 0),
-  category    text not null,
-  description text,
-  txn_date    date not null default current_date,
-  created_by  uuid not null references public.profiles(id) on delete cascade,
-  created_at  timestamptz not null default now()
+create table if not exists public.budget_lines (
+  id         uuid primary key default gen_random_uuid(),
+  kind       text not null check (kind in ('expense','revenue')),
+  name       text not null,
+  sort_order int not null default 0,
+  created_by uuid not null references public.profiles(id) on delete cascade,
+  created_at timestamptz not null default now()
 );
-create index if not exists transactions_date_idx on public.transactions (txn_date);
+create index if not exists budget_lines_kind_idx on public.budget_lines (kind, sort_order);
 
-create table if not exists public.recurring_transactions (
-  id           uuid primary key default gen_random_uuid(),
-  type         text not null check (type in ('income','expense')),
-  amount       numeric(12,2) not null check (amount >= 0),
-  category     text not null,
-  description  text,
-  recurrence   text not null default 'monthly'
-                 check (recurrence in ('daily','weekly','biweekly','monthly','yearly')),
-  day_of_month int check (day_of_month between 1 and 31),
-  active       boolean not null default true,
-  created_by   uuid not null references public.profiles(id) on delete cascade,
-  created_at   timestamptz not null default now()
+create table if not exists public.budget_amounts (
+  id         uuid primary key default gen_random_uuid(),
+  line_id    uuid not null references public.budget_lines(id) on delete cascade,
+  month      date not null, -- always the first day of the month
+  amount     numeric(12,2) not null default 0,
+  updated_at timestamptz not null default now(),
+  unique (line_id, month)
 );
+create index if not exists budget_amounts_month_idx on public.budget_amounts (month);
 
-create table if not exists public.budget_categories (
-  id             uuid primary key default gen_random_uuid(),
-  name           text not null,
-  kind           text not null default 'variable'
-                   check (kind in ('fixed','variable','savings','income')),
-  monthly_budget numeric(12,2) not null default 0,
-  created_by     uuid not null references public.profiles(id) on delete cascade,
-  created_at     timestamptz not null default now(),
-  unique (name)
+-- Singleton row (id is always true) holding the opening balance.
+create table if not exists public.budget_meta (
+  id               boolean primary key default true check (id),
+  start_month      date not null,
+  starting_balance numeric(12,2) not null default 0,
+  updated_at       timestamptz not null default now()
 );
 
 -- ---------------------------------------------------------------------------
@@ -227,9 +227,9 @@ alter table public.todos                 enable row level security;
 alter table public.chores                enable row level security;
 alter table public.grocery_items         enable row level security;
 alter table public.pickup_duties         enable row level security;
-alter table public.transactions          enable row level security;
-alter table public.recurring_transactions enable row level security;
-alter table public.budget_categories     enable row level security;
+alter table public.budget_lines          enable row level security;
+alter table public.budget_amounts        enable row level security;
+alter table public.budget_meta           enable row level security;
 alter table public.goals                 enable row level security;
 alter table public.vacation_ideas        enable row level security;
 alter table public.vacation_links        enable row level security;
@@ -242,7 +242,7 @@ declare
   t text;
   shared_tables text[] := array[
     'profiles','todos','chores','grocery_items','pickup_duties',
-    'transactions','recurring_transactions','budget_categories','goals',
+    'budget_lines','budget_amounts','budget_meta','goals',
     'vacation_ideas','vacation_links','vacation_photos'
   ];
 begin
@@ -271,6 +271,14 @@ end $$;
 
 drop trigger if exists goals_touch on public.goals;
 create trigger goals_touch before update on public.goals
+  for each row execute function public.touch_updated_at();
+
+drop trigger if exists budget_amounts_touch on public.budget_amounts;
+create trigger budget_amounts_touch before update on public.budget_amounts
+  for each row execute function public.touch_updated_at();
+
+drop trigger if exists budget_meta_touch on public.budget_meta;
+create trigger budget_meta_touch before update on public.budget_meta
   for each row execute function public.touch_updated_at();
 
 -- ===========================================================================

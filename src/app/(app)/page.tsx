@@ -21,7 +21,7 @@ import {
 import { getHousehold } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { fetchHouseholdEvents } from "@/lib/google";
-import { summarizeMonth } from "@/lib/budget";
+import { buildBudgetView } from "@/lib/budget";
 import {
   formatCurrency,
   monthKey,
@@ -36,7 +36,9 @@ import type {
   Todo,
   Chore,
   Goal,
-  Transaction,
+  BudgetLine,
+  BudgetAmount,
+  BudgetMeta,
   PickupDuty,
   CalendarEvent,
 } from "@/lib/types";
@@ -75,7 +77,9 @@ export default async function DashboardPage() {
     todosRes,
     choresRes,
     goalsRes,
-    txnRes,
+    budgetLinesRes,
+    budgetAmountsRes,
+    budgetMetaRes,
     dutiesRes,
     groceryRes,
     events,
@@ -92,7 +96,9 @@ export default async function DashboardPage() {
       .eq("year", now.getFullYear())
       .neq("status", "done")
       .order("updated_at", { ascending: true }),
-    supabase.from("transactions").select("*").gte("txn_date", `${month}-01`),
+    supabase.from("budget_lines").select("*"),
+    supabase.from("budget_amounts").select("*"),
+    supabase.from("budget_meta").select("*").maybeSingle(),
     supabase.from("pickup_duties").select("*").eq("day_of_week", todayDow),
     supabase
       .from("grocery_items")
@@ -117,11 +123,19 @@ export default async function DashboardPage() {
   const staleGoals = goals.filter(
     (g) => (nowMs - new Date(g.updated_at).getTime()) / 86_400_000 > 30,
   );
-  const transactions = (txnRes.data ?? []) as Transaction[];
+  const budgetLines = (budgetLinesRes.data ?? []) as BudgetLine[];
+  const budgetAmounts = (budgetAmountsRes.data ?? []) as BudgetAmount[];
+  const budgetMeta = (budgetMetaRes.data ?? null) as BudgetMeta | null;
   const duties = (dutiesRes.data ?? []) as PickupDuty[];
   const groceryCount = groceryRes.count ?? 0;
 
-  const summary = summarizeMonth(transactions, month);
+  const { current: budget } = buildBudgetView(
+    budgetAmounts,
+    budgetLines,
+    budgetMeta,
+    month,
+    1,
+  );
 
   const todayEvents = events
     .filter((e) => occursOn(today, e))
@@ -291,13 +305,12 @@ export default async function DashboardPage() {
         actionLabel="Details"
       >
         <div className="grid grid-cols-3 gap-3">
-          <Stat label="Income" value={summary.income} tone="emerald" />
-          <Stat label="Spent" value={summary.expense} tone="neutral" />
+          <Stat label="Revenue" value={budget.totalRevenue} tone="emerald" />
+          <Stat label="Expenses" value={budget.totalExpenses} tone="red" />
           <Stat
-            label="Net"
-            value={summary.net}
-            tone={summary.net >= 0 ? "emerald" : "red"}
-            signed
+            label="Remaining"
+            value={budget.remaining}
+            tone={budget.remaining >= 0 ? "emerald" : "red"}
           />
         </div>
       </Section>

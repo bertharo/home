@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
-import type { Recurrence } from "@/lib/types";
+import type { BudgetLineKind } from "@/lib/types";
 
 async function ctx() {
   const supabase = await createClient();
@@ -13,120 +13,75 @@ async function ctx() {
   return { supabase, userId: user.id };
 }
 
-export async function addTransaction(formData: FormData) {
+/** Normalize a "YYYY-MM" key to the first-of-month date string Postgres wants. */
+function monthDate(month: string) {
+  return `${month.slice(0, 7)}-01`;
+}
+
+export async function addLine(formData: FormData) {
   const { supabase, userId } = await ctx();
-  const type = (String(formData.get("type") ?? "expense") ||
-    "expense") as "income" | "expense";
-  const amount = Number(formData.get("amount") ?? 0);
-  if (!amount || amount <= 0) return;
-  const category = String(formData.get("category") ?? "Other") || "Other";
-  const description = String(formData.get("description") ?? "").trim() || null;
-  const txn_date =
-    String(formData.get("txn_date") ?? "") ||
-    new Date().toISOString().slice(0, 10);
-
-  await supabase.from("transactions").insert({
-    type,
-    amount,
-    category,
-    description,
-    txn_date,
-    created_by: userId,
-  });
-
-  revalidatePath("/budget");
-  revalidatePath("/");
-}
-
-export async function deleteTransaction(id: string) {
-  const { supabase } = await ctx();
-  await supabase.from("transactions").delete().eq("id", id);
-  revalidatePath("/budget");
-  revalidatePath("/");
-}
-
-export async function addRecurring(formData: FormData) {
-  const { supabase, userId } = await ctx();
-  const type = (String(formData.get("type") ?? "expense") ||
-    "expense") as "income" | "expense";
-  const amount = Number(formData.get("amount") ?? 0);
-  if (!amount || amount <= 0) return;
-  const category = String(formData.get("category") ?? "Other") || "Other";
-  const description = String(formData.get("description") ?? "").trim() || null;
-  const recurrence = (String(formData.get("recurrence") ?? "monthly") ||
-    "monthly") as Recurrence;
-  const dayRaw = formData.get("day_of_month");
-  const day_of_month = dayRaw ? Number(dayRaw) : null;
-
-  await supabase.from("recurring_transactions").insert({
-    type,
-    amount,
-    category,
-    description,
-    recurrence,
-    day_of_month,
-    created_by: userId,
-  });
-
-  revalidatePath("/budget");
-  revalidatePath("/");
-}
-
-export async function toggleRecurring(id: string, active: boolean) {
-  const { supabase } = await ctx();
-  await supabase.from("recurring_transactions").update({ active }).eq("id", id);
-  revalidatePath("/budget");
-  revalidatePath("/");
-}
-
-export async function deleteRecurring(id: string) {
-  const { supabase } = await ctx();
-  await supabase.from("recurring_transactions").delete().eq("id", id);
-  revalidatePath("/budget");
-  revalidatePath("/");
-}
-
-/** Post this recurring item as an actual transaction for a given month. */
-export async function logRecurringNow(id: string) {
-  const { supabase, userId } = await ctx();
-  const { data: r } = await supabase
-    .from("recurring_transactions")
-    .select("*")
-    .eq("id", id)
-    .single();
-  if (!r) return;
-
-  await supabase.from("transactions").insert({
-    type: r.type,
-    amount: r.amount,
-    category: r.category,
-    description: r.description,
-    txn_date: new Date().toISOString().slice(0, 10),
-    created_by: userId,
-  });
-
-  revalidatePath("/budget");
-  revalidatePath("/");
-}
-
-export async function setCategoryBudget(formData: FormData) {
-  const { supabase, userId } = await ctx();
+  const kind = (String(formData.get("kind") ?? "expense") ||
+    "expense") as BudgetLineKind;
   const name = String(formData.get("name") ?? "").trim();
   if (!name) return;
-  const kind = (String(formData.get("kind") ?? "variable") ||
-    "variable") as "fixed" | "variable" | "savings" | "income";
-  const monthly_budget = Number(formData.get("monthly_budget") ?? 0);
 
-  await supabase.from("budget_categories").upsert(
-    { name, kind, monthly_budget, created_by: userId },
-    { onConflict: "name" },
+  const { data: last } = await supabase
+    .from("budget_lines")
+    .select("sort_order")
+    .eq("kind", kind)
+    .order("sort_order", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  const sort_order = (last?.sort_order ?? 0) + 1;
+
+  await supabase
+    .from("budget_lines")
+    .insert({ kind, name, sort_order, created_by: userId });
+
+  revalidatePath("/budget");
+  revalidatePath("/");
+}
+
+export async function renameLine(id: string, name: string) {
+  const { supabase } = await ctx();
+  const clean = name.trim();
+  if (!clean) return;
+  await supabase.from("budget_lines").update({ name: clean }).eq("id", id);
+  revalidatePath("/budget");
+}
+
+export async function deleteLine(id: string) {
+  const { supabase } = await ctx();
+  await supabase.from("budget_lines").delete().eq("id", id);
+  revalidatePath("/budget");
+  revalidatePath("/");
+}
+
+/** Upsert a single line's amount for a given month ("YYYY-MM"). */
+export async function setAmount(lineId: string, month: string, amount: number) {
+  const { supabase } = await ctx();
+  const value = Number.isFinite(amount) ? amount : 0;
+
+  await supabase.from("budget_amounts").upsert(
+    { line_id: lineId, month: monthDate(month), amount: value },
+    { onConflict: "line_id,month" },
   );
 
   revalidatePath("/budget");
+  revalidatePath("/");
 }
 
-export async function deleteCategoryBudget(id: string) {
+/** Set the opening balance and the month the cash flow starts accumulating. */
+export async function setStartingBalance(month: string, balance: number) {
   const { supabase } = await ctx();
-  await supabase.from("budget_categories").delete().eq("id", id);
+  const value = Number.isFinite(balance) ? balance : 0;
+
+  await supabase.from("budget_meta").upsert(
+    { id: true, start_month: monthDate(month), starting_balance: value },
+    { onConflict: "id" },
+  );
+
   revalidatePath("/budget");
+  revalidatePath("/");
 }
