@@ -5,7 +5,12 @@ import { Plus } from "lucide-react";
 import { formatCents, parseMoneyToCents } from "@/lib/utils";
 import type { CategoryRow, Column } from "./BudgetView";
 import { CategorySettings } from "./CategorySettings";
-import { addCategory, setOverride, clearOverride } from "./actions";
+import {
+  addCategory,
+  setOverride,
+  clearOverride,
+  updateCategory,
+} from "./actions";
 
 const LABEL_COL = "sticky left-0 z-10 w-44 min-w-44 max-w-44";
 const VALUE_COL = "min-w-[7rem] w-28";
@@ -141,14 +146,7 @@ function CategoryTr({
     <tr className="border-b border-neutral-100">
       <td className={`${LABEL_COL} bg-white px-3 py-1 text-left`}>
         <div className="flex items-center gap-1">
-          <span
-            className={
-              "flex-1 truncate " +
-              (row.active ? "text-neutral-700" : "text-neutral-400 line-through")
-            }
-          >
-            {row.name}
-          </span>
+          <InlineName row={row} />
           <CategorySettings row={row} columns={columns} />
         </div>
       </td>
@@ -156,6 +154,30 @@ function CategoryTr({
         <GridCell key={col.key} row={row} col={col} cellIndex={i} />
       ))}
     </tr>
+  );
+}
+
+function InlineName({ row }: { row: CategoryRow }) {
+  const [name, setName] = useState(row.name);
+  const [, start] = useTransition();
+  return (
+    <input
+      value={name}
+      onChange={(e) => setName(e.target.value)}
+      onBlur={() => {
+        const clean = name.trim();
+        if (clean && clean !== row.name)
+          start(() => updateCategory(row.id, { name: clean }));
+        else if (!clean) setName(row.name);
+      }}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+      }}
+      className={
+        "min-w-0 flex-1 rounded-md border border-transparent bg-transparent px-1 py-0.5 text-left text-xs outline-none transition hover:border-neutral-200 focus:border-neutral-900 focus:bg-white " +
+        (row.active ? "text-neutral-700" : "text-neutral-400 line-through")
+      }
+    />
   );
 }
 

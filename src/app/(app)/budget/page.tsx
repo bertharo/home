@@ -130,6 +130,8 @@ export default async function BudgetPage() {
         }}
         horizonMonths={settings.horizonMonths}
         startingBalance={settings.startingBalance}
+        startYear={settings.startYear}
+        startMonth={settings.startMonth}
       />
     </div>
   );

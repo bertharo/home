@@ -14,6 +14,7 @@ import type { Cadence } from "@/lib/budget";
 import { setHorizon } from "./actions";
 import { BudgetCharts } from "./BudgetCharts";
 import { BudgetGrid } from "./BudgetGrid";
+import { BudgetSettings } from "./BudgetSettings";
 
 export type Cell = { amount: number; overridden: boolean };
 
@@ -65,6 +66,8 @@ export function BudgetView({
   kpis,
   horizonMonths,
   startingBalance,
+  startYear,
+  startMonth,
 }: {
   columns: Column[];
   expenseRows: CategoryRow[];
@@ -72,16 +75,21 @@ export function BudgetView({
   kpis: Kpis;
   horizonMonths: number;
   startingBalance: number;
+  startYear: number;
+  startMonth: number;
 }) {
   const [pending, start] = useTransition();
 
   return (
     <div className="space-y-5">
-      {/* Horizon toggle */}
-      <div className="flex items-center justify-between">
-        <p className="text-xs font-medium uppercase tracking-wide text-neutral-400">
-          Forecast horizon
-        </p>
+      {/* Controls */}
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <BudgetSettings
+          startingBalance={startingBalance}
+          startYear={startYear}
+          startMonth={startMonth}
+          horizonMonths={horizonMonths}
+        />
         <div className="flex rounded-xl border border-neutral-200 bg-white p-0.5">
           {HORIZONS.map((h) => {
             const active = h.months === horizonMonths;
