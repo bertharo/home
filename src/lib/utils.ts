@@ -14,6 +14,27 @@ export function formatCurrency(amount: number, opts?: { cents?: boolean }) {
   }).format(amount);
 }
 
+/** Format an integer-cents amount as USD. */
+export function formatCents(cents: number, opts?: { cents?: boolean }) {
+  return formatCurrency(cents / 100, opts);
+}
+
+/** Parse a user-typed money string (e.g. "$4,200.50") into integer cents. */
+export function parseMoneyToCents(text: string): number {
+  const n = Number(String(text).replace(/[^0-9.-]/g, ""));
+  return Number.isFinite(n) ? Math.round(n * 100) : 0;
+}
+
+/** Compact USD from integer cents, e.g. "$1.2M" — for chart axes/KPIs. */
+export function compactCents(cents: number) {
+  return new Intl.NumberFormat("en-US", {
+    notation: "compact",
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 1,
+  }).format(cents / 100);
+}
+
 /** Returns "YYYY-MM" for a given date (defaults to now). */
 export function monthKey(date: Date = new Date()) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;

@@ -20,14 +20,14 @@ Storage), **Tailwind CSS v4**, the **Google Calendar API**, and deployed on
 | **Grocery** | Fast quick-add, check off as you shop, grouped by store section. |
 | **Pickups & duties** | Lightweight weekly schedule of who's covering what, which day. |
 | **Calendar** | Two-way Google Calendar sync for both people, unified color-coded view, month + week, and "family events" that write to both calendars. |
-| **Budget** | Spreadsheet-style monthly cash flow: expense & revenue line items you edit inline, auto-computed Total Expenses / Total Revenue, a Beginning Balance that carries over from the prior month's remaining balance, Total Remaining Balance, and a cash-flow chart across months. |
+| **Budget** | Dynamic running-balance forecast. Categories have a default amount + cadence (monthly / specific-months / manual) with per-month overrides and one-click step changes. Each month's remaining balance chains into the next, projecting 1–5 years out. Onboarding wizard, spreadsheet grid, KPI cards, and charts (balance trajectory, cash flow, expense/revenue composition) all off one deterministic compute engine. |
 | **Goals** | Individual + joint annual goals with status and progress notes; stale goals surface on the dashboard. |
 | **Trip ideas** | Shared idea board with status (idea→researching→planned→booked), rough cost/timing, links, and photo uploads. |
 
 **Design choices baked in (chosen with you up front):**
 
 - **Supabase** for Postgres + Auth + Storage (fast to wire, generous free tier, photo storage included).
-- **Manual budget entry** for v1 (no Plaid/bank sync yet — keeps scope tight).
+- **Budget amounts stored as integer cents** so a 60-month balance chain never drifts.
 - **No push notifications** in v1 — the dashboard surfaces what needs attention instead.
 - **Magic-link auth**, no public signup, limited to exactly two provisioned accounts.
 
@@ -148,10 +148,13 @@ Screen**. It runs full-screen as a PWA and keeps you signed in.
   view reads both members' tokens via a service-role client (server-only),
   refreshing/persisting access tokens automatically. "Family events" are written
   to every connected calendar and tagged so they can be labeled in-app.
-- **Budget cash flow**: `src/lib/budget.ts` sums each month's expense and revenue
-  line items, then walks forward from an opening balance so every month's
-  Beginning Balance = the prior month's Total Remaining Balance
-  (`remaining = beginning + revenue − expenses`).
+- **Budget engine**: `src/lib/budget/engine.ts` is a pure, deterministic,
+  integer-cents compute function. It resolves each category for a month
+  (override → cadence → default), then chains
+  `remaining = beginning + revenue − expenses` forward across month and year
+  boundaries to project 1–5 years out. Covered by `engine.test.ts`
+  (run `npm test`), which asserts the real spreadsheet's Jan/Feb/March numbers
+  and multi-year chaining.
 
 ## Project structure
 
@@ -170,7 +173,7 @@ src/
   lib/
     supabase/         # client / server / admin / middleware helpers
     google.ts         # Calendar API integration
-    budget.ts         # Monthly cash-flow math
+    budget/           # Cash-flow engine (engine.ts) + DB mappers + tests
     auth.ts, types.ts, constants.ts, utils.ts
   proxy.ts            # Session refresh + route protection
 supabase/schema.sql   # Full database schema + RLS + storage bucket

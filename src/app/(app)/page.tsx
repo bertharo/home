@@ -21,7 +21,17 @@ import {
 import { getHousehold } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { fetchHouseholdEvents } from "@/lib/google";
-import { buildBudgetView } from "@/lib/budget";
+import {
+  computeForecast,
+  toCategory,
+  toOverride,
+  toSettings,
+} from "@/lib/budget";
+import type {
+  BudgetCategoryRow,
+  BudgetOverrideRow,
+  BudgetSettingsRow,
+} from "@/lib/budget";
 import {
   formatCurrency,
   monthKey,
@@ -36,9 +46,6 @@ import type {
   Todo,
   Chore,
   Goal,
-  BudgetLine,
-  BudgetAmount,
-  BudgetMeta,
   PickupDuty,
   CalendarEvent,
 } from "@/lib/types";
@@ -77,9 +84,9 @@ export default async function DashboardPage() {
     todosRes,
     choresRes,
     goalsRes,
-    budgetLinesRes,
-    budgetAmountsRes,
-    budgetMetaRes,
+    budgetCategoriesRes,
+    budgetOverridesRes,
+    budgetSettingsRes,
     dutiesRes,
     groceryRes,
     events,
@@ -96,9 +103,9 @@ export default async function DashboardPage() {
       .eq("year", now.getFullYear())
       .neq("status", "done")
       .order("updated_at", { ascending: true }),
-    supabase.from("budget_lines").select("*"),
-    supabase.from("budget_amounts").select("*"),
-    supabase.from("budget_meta").select("*").maybeSingle(),
+    supabase.from("budget_categories").select("*"),
+    supabase.from("budget_overrides").select("*"),
+    supabase.from("budget_settings").select("*").maybeSingle(),
     supabase.from("pickup_duties").select("*").eq("day_of_week", todayDow),
     supabase
       .from("grocery_items")
@@ -123,19 +130,28 @@ export default async function DashboardPage() {
   const staleGoals = goals.filter(
     (g) => (nowMs - new Date(g.updated_at).getTime()) / 86_400_000 > 30,
   );
-  const budgetLines = (budgetLinesRes.data ?? []) as BudgetLine[];
-  const budgetAmounts = (budgetAmountsRes.data ?? []) as BudgetAmount[];
-  const budgetMeta = (budgetMetaRes.data ?? null) as BudgetMeta | null;
   const duties = (dutiesRes.data ?? []) as PickupDuty[];
   const groceryCount = groceryRes.count ?? 0;
 
-  const { current: budget } = buildBudgetView(
-    budgetAmounts,
-    budgetLines,
-    budgetMeta,
-    month,
-    1,
+  const budgetSettingsRow = (budgetSettingsRes.data ??
+    null) as BudgetSettingsRow | null;
+  const budgetCategories = ((budgetCategoriesRes.data ?? []) as BudgetCategoryRow[]).map(
+    toCategory,
   );
+  const budgetOverrides = ((budgetOverridesRes.data ?? []) as BudgetOverrideRow[]).map(
+    toOverride,
+  );
+
+  const nowYM = { year: now.getFullYear(), month: now.getMonth() + 1 };
+  const budgetReady = !!budgetSettingsRow?.onboarded;
+  const budgetCol = budgetReady
+    ? computeForecast(
+        budgetCategories,
+        budgetOverrides,
+        toSettings(budgetSettingsRow),
+        { now: nowYM },
+      ).find((c) => c.year === nowYM.year && c.month === nowYM.month) ?? null
+    : null;
 
   const todayEvents = events
     .filter((e) => occursOn(today, e))
@@ -304,15 +320,32 @@ export default async function DashboardPage() {
         href="/budget"
         actionLabel="Details"
       >
-        <div className="grid grid-cols-3 gap-3">
-          <Stat label="Revenue" value={budget.totalRevenue} tone="emerald" />
-          <Stat label="Expenses" value={budget.totalExpenses} tone="red" />
-          <Stat
-            label="Remaining"
-            value={budget.remaining}
-            tone={budget.remaining >= 0 ? "emerald" : "red"}
-          />
-        </div>
+        {budgetCol ? (
+          <div className="grid grid-cols-3 gap-3">
+            <Stat
+              label="Revenue"
+              value={budgetCol.totalRevenue / 100}
+              tone="emerald"
+            />
+            <Stat
+              label="Expenses"
+              value={budgetCol.totalExpenses / 100}
+              tone="red"
+            />
+            <Stat
+              label="Remaining"
+              value={budgetCol.remainingBalance / 100}
+              tone={budgetCol.remainingBalance >= 0 ? "emerald" : "red"}
+            />
+          </div>
+        ) : (
+          <Link
+            href="/budget"
+            className="block rounded-2xl border border-dashed border-neutral-300 bg-white px-4 py-5 text-center text-sm text-neutral-500 hover:border-neutral-400"
+          >
+            Set up your budget forecast →
+          </Link>
+        )}
       </Section>
 
       {/* Goals needing attention */}

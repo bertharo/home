@@ -115,44 +115,57 @@ create table if not exists public.pickup_duties (
 );
 
 -- ---------------------------------------------------------------------------
--- Budget: spreadsheet-style monthly cash flow.
---   * budget_lines  = the row labels (each an expense or a revenue item)
---   * budget_amounts = one value per line per month
---   * budget_meta   = singleton: the starting month + opening balance.
--- Derived per month:
---   Total Expenses          = sum of expense-line amounts
---   Total Revenue           = sum of revenue-line amounts
---   Beginning Balance       = opening balance (start month) OR prior month's
---                             Total Remaining Balance
---   Total Remaining Balance = Beginning Balance + Total Revenue - Total Expenses
+-- Budget: dynamic running-balance forecast.
+--   * budget_settings   = singleton: opening balance, start month, horizon.
+--   * budget_categories = revenue/expense sources with a default + cadence.
+--   * budget_overrides  = per-(category, year, month) amount that supersedes
+--                         the category default for that one month.
+-- All money is stored as INTEGER CENTS (bigint) to avoid float drift across
+-- long (60-month) balance chains. Balances are computed by the app engine
+-- (src/lib/budget/engine.ts), never stored as source of truth.
 -- ---------------------------------------------------------------------------
-create table if not exists public.budget_lines (
-  id         uuid primary key default gen_random_uuid(),
-  kind       text not null check (kind in ('expense','revenue')),
-  name       text not null,
-  sort_order int not null default 0,
-  created_by uuid not null references public.profiles(id) on delete cascade,
-  created_at timestamptz not null default now()
-);
-create index if not exists budget_lines_kind_idx on public.budget_lines (kind, sort_order);
-
-create table if not exists public.budget_amounts (
-  id         uuid primary key default gen_random_uuid(),
-  line_id    uuid not null references public.budget_lines(id) on delete cascade,
-  month      date not null, -- always the first day of the month
-  amount     numeric(12,2) not null default 0,
-  updated_at timestamptz not null default now(),
-  unique (line_id, month)
-);
-create index if not exists budget_amounts_month_idx on public.budget_amounts (month);
-
--- Singleton row (id is always true) holding the opening balance.
-create table if not exists public.budget_meta (
+create table if not exists public.budget_settings (
   id               boolean primary key default true check (id),
-  start_month      date not null,
-  starting_balance numeric(12,2) not null default 0,
+  starting_balance bigint not null default 0, -- cents
+  start_year       int not null,
+  start_month      int not null check (start_month between 1 and 12),
+  horizon_months   int not null default 24 check (horizon_months between 1 and 120),
+  onboarded        boolean not null default false,
   updated_at       timestamptz not null default now()
 );
+
+create table if not exists public.budget_categories (
+  id             uuid primary key default gen_random_uuid(),
+  name           text not null,
+  kind           text not null check (kind in ('revenue','expense')),
+  default_amount bigint not null default 0, -- cents
+  cadence        text not null default 'monthly'
+                   check (cadence in ('monthly','specific_months','none')),
+  cadence_months int[] not null default '{}',
+  active         boolean not null default true,
+  sort_order     int not null default 0,
+  created_by     uuid not null references public.profiles(id) on delete cascade,
+  updated_by     uuid references public.profiles(id) on delete set null,
+  created_at     timestamptz not null default now(),
+  updated_at     timestamptz not null default now()
+);
+create index if not exists budget_categories_kind_idx
+  on public.budget_categories (kind, sort_order);
+
+create table if not exists public.budget_overrides (
+  id          uuid primary key default gen_random_uuid(),
+  category_id uuid not null references public.budget_categories(id) on delete cascade,
+  year        int not null,
+  month       int not null check (month between 1 and 12),
+  amount      bigint not null default 0, -- cents
+  created_by  uuid not null references public.profiles(id) on delete cascade,
+  updated_by  uuid references public.profiles(id) on delete set null,
+  created_at  timestamptz not null default now(),
+  updated_at  timestamptz not null default now(),
+  unique (category_id, year, month)
+);
+create index if not exists budget_overrides_cat_idx
+  on public.budget_overrides (category_id, year, month);
 
 -- ---------------------------------------------------------------------------
 -- Annual goals
@@ -227,9 +240,9 @@ alter table public.todos                 enable row level security;
 alter table public.chores                enable row level security;
 alter table public.grocery_items         enable row level security;
 alter table public.pickup_duties         enable row level security;
-alter table public.budget_lines          enable row level security;
-alter table public.budget_amounts        enable row level security;
-alter table public.budget_meta           enable row level security;
+alter table public.budget_settings       enable row level security;
+alter table public.budget_categories     enable row level security;
+alter table public.budget_overrides      enable row level security;
 alter table public.goals                 enable row level security;
 alter table public.vacation_ideas        enable row level security;
 alter table public.vacation_links        enable row level security;
@@ -242,7 +255,7 @@ declare
   t text;
   shared_tables text[] := array[
     'profiles','todos','chores','grocery_items','pickup_duties',
-    'budget_lines','budget_amounts','budget_meta','goals',
+    'budget_settings','budget_categories','budget_overrides','goals',
     'vacation_ideas','vacation_links','vacation_photos'
   ];
 begin
@@ -273,12 +286,16 @@ drop trigger if exists goals_touch on public.goals;
 create trigger goals_touch before update on public.goals
   for each row execute function public.touch_updated_at();
 
-drop trigger if exists budget_amounts_touch on public.budget_amounts;
-create trigger budget_amounts_touch before update on public.budget_amounts
+drop trigger if exists budget_settings_touch on public.budget_settings;
+create trigger budget_settings_touch before update on public.budget_settings
   for each row execute function public.touch_updated_at();
 
-drop trigger if exists budget_meta_touch on public.budget_meta;
-create trigger budget_meta_touch before update on public.budget_meta
+drop trigger if exists budget_categories_touch on public.budget_categories;
+create trigger budget_categories_touch before update on public.budget_categories
+  for each row execute function public.touch_updated_at();
+
+drop trigger if exists budget_overrides_touch on public.budget_overrides;
+create trigger budget_overrides_touch before update on public.budget_overrides
   for each row execute function public.touch_updated_at();
 
 -- ===========================================================================

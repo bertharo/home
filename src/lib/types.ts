@@ -63,32 +63,7 @@ export type PickupDuty = {
   created_at: string;
 };
 
-// Budget — spreadsheet-style monthly cash flow.
-export type BudgetLineKind = "expense" | "revenue";
-
-export type BudgetLine = {
-  id: string;
-  kind: BudgetLineKind;
-  name: string;
-  sort_order: number;
-  created_by: string;
-  created_at: string;
-};
-
-export type BudgetAmount = {
-  id: string;
-  line_id: string;
-  month: string; // YYYY-MM-DD (first day of the month)
-  amount: number;
-  updated_at: string;
-};
-
-export type BudgetMeta = {
-  id: boolean; // always true (singleton)
-  start_month: string; // YYYY-MM-DD
-  starting_balance: number;
-  updated_at: string;
-};
+// Budget types live in src/lib/budget (engine domain types + DB row types).
 
 export type Goal = {
   id: string;
