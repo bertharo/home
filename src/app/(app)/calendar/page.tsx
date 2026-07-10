@@ -3,10 +3,12 @@ import {
   endOfMonth,
   startOfWeek,
   endOfWeek,
-  parseISO,
+  addDays,
   isValid,
+  parseISO,
 } from "date-fns";
 import { getHousehold } from "@/lib/auth";
+import { dateFromKey, formatDateKey } from "@/lib/timezone";
 import {
   fetchHouseholdEvents,
   connectedUserIds,
@@ -27,19 +29,26 @@ export default async function CalendarPage({
   const sp = await searchParams;
   const view = sp.view === "week" ? "week" : "month";
 
-  const parsed = sp.date ? parseISO(sp.date) : new Date();
-  const refDate = isValid(parsed) ? parsed : new Date();
+  const dateKey =
+    sp.date && isValid(parseISO(sp.date))
+      ? sp.date.slice(0, 10)
+      : formatDateKey();
+  const refDate = dateFromKey(dateKey);
 
   const { me, all } = await getHousehold();
 
-  const rangeStart =
+  const rangeStart = addDays(
     view === "week"
       ? startOfWeek(refDate, { weekStartsOn: 0 })
-      : startOfWeek(startOfMonth(refDate), { weekStartsOn: 0 });
-  const rangeEnd =
+      : startOfWeek(startOfMonth(refDate), { weekStartsOn: 0 }),
+    -1,
+  );
+  const rangeEnd = addDays(
     view === "week"
       ? endOfWeek(refDate, { weekStartsOn: 0 })
-      : endOfWeek(endOfMonth(refDate), { weekStartsOn: 0 });
+      : endOfWeek(endOfMonth(refDate), { weekStartsOn: 0 }),
+    1,
+  );
 
   const [events, connectedIds] = await Promise.all([
     fetchHouseholdEvents(all, rangeStart, rangeEnd),
@@ -60,7 +69,7 @@ export default async function CalendarPage({
       />
       <CalendarView
         view={view}
-        dateStr={refDate.toISOString().slice(0, 10)}
+        dateStr={dateKey}
         events={events}
         profiles={all}
         anyConnected={connectedIds.length > 0}

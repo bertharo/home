@@ -11,28 +11,39 @@ import {
   format,
   isSameDay,
   isSameMonth,
-  isToday,
   parseISO,
-  startOfDay,
   startOfMonth,
   startOfWeek,
 } from "date-fns";
 import { ChevronLeft, ChevronRight, MapPin, CalendarDays } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { formatDateKey, parseLocalDateKey } from "@/lib/timezone";
 import { Fab } from "@/components/ui/Fab";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { EventAdd } from "./EventAdd";
 import type { CalendarEvent, Profile } from "@/lib/types";
 
 const WEEKDAYS = ["S", "M", "T", "W", "T", "F", "S"];
+const MONTH_CELL_MAX_EVENTS = 3;
+
+/** Light tint behind a hex color for month-view event chips. */
+function tint(hex: string) {
+  if (/^#[0-9a-f]{6}$/i.test(hex)) return `${hex}24`;
+  return `color-mix(in srgb, ${hex} 14%, transparent)`;
+}
 
 function occursOn(day: Date, ev: CalendarEvent) {
+  const dayKey = format(day, "yyyy-MM-dd");
   if (ev.allDay) {
-    const s = startOfDay(parseISO(ev.start));
-    const e = startOfDay(parseISO(ev.end));
-    return day >= s && day < e;
+    const startKey = ev.start.slice(0, 10);
+    const endKey = ev.end.slice(0, 10);
+    return dayKey >= startKey && dayKey < endKey;
   }
   return isSameDay(day, parseISO(ev.start));
+}
+
+function isHouseholdToday(day: Date) {
+  return format(day, "yyyy-MM-dd") === formatDateKey(new Date());
 }
 
 function sortEvents(a: CalendarEvent, b: CalendarEvent) {
@@ -55,7 +66,7 @@ export function CalendarView({
   anyConnected: boolean;
 }) {
   const router = useRouter();
-  const refDate = parseISO(dateStr);
+  const refDate = parseLocalDateKey(dateStr);
   const [selected, setSelected] = useState<Date>(refDate);
   const [addOpen, setAddOpen] = useState(false);
   const [addDate, setAddDate] = useState<Date>(refDate);
@@ -112,10 +123,11 @@ export function CalendarView({
 
         <div className="flex items-center gap-1">
           <button
-            onClick={() => {
-              setSelected(new Date());
-              go(view, new Date());
-            }}
+              onClick={() => {
+                const today = parseLocalDateKey(formatDateKey(new Date()));
+                setSelected(today);
+                go(view, today);
+              }}
             className="rounded-lg px-2.5 py-1.5 text-sm font-medium text-neutral-500 transition hover:bg-neutral-100"
           >
             Today
@@ -247,23 +259,25 @@ function MonthGrid({
       </div>
       <div className="grid grid-cols-7">
         {days.map((day, i) => {
-          const dayEvents = events.filter((e) => occursOn(day, e));
+          const dayEvents = events.filter((e) => occursOn(day, e)).sort(sortEvents);
+          const visible = dayEvents.slice(0, MONTH_CELL_MAX_EVENTS);
+          const overflow = dayEvents.length - visible.length;
           const inMonth = isSameMonth(day, refDate);
           const isSel = isSameDay(day, selected);
-          const today = isToday(day);
+          const today = isHouseholdToday(day);
           return (
             <button
               key={i}
               onClick={() => onSelect(day)}
               className={cn(
-                "flex min-h-[3.6rem] flex-col items-center gap-1 border-b border-r border-neutral-100 p-1.5 transition",
+                "flex min-h-[5.25rem] flex-col items-stretch gap-0.5 border-b border-r border-neutral-100 p-1 text-left transition sm:min-h-[6.5rem] sm:p-1.5",
                 i % 7 === 6 && "border-r-0",
                 isSel ? "bg-neutral-100" : "hover:bg-neutral-50",
               )}
             >
               <span
                 className={cn(
-                  "flex h-6 w-6 items-center justify-center rounded-full text-xs",
+                  "flex h-6 w-6 shrink-0 items-center justify-center self-start rounded-full text-xs",
                   today
                     ? "bg-neutral-900 font-semibold text-white"
                     : inMonth
@@ -273,20 +287,49 @@ function MonthGrid({
               >
                 {format(day, "d")}
               </span>
-              <div className="flex flex-wrap items-center justify-center gap-0.5">
-                {dayEvents.slice(0, 4).map((e) => (
-                  <span
-                    key={e.id}
-                    className="h-1.5 w-1.5 rounded-full"
-                    style={{ backgroundColor: e.ownerColor }}
-                  />
+              <div className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-hidden">
+                {visible.map((e) => (
+                  <MonthEventChip key={e.id} event={e} />
                 ))}
+                {overflow > 0 && (
+                  <span className="truncate px-0.5 text-[10px] font-medium text-neutral-500">
+                    +{overflow} more
+                  </span>
+                )}
               </div>
             </button>
           );
         })}
       </div>
     </div>
+  );
+}
+
+function MonthEventChip({ event }: { event: CalendarEvent }) {
+  const timePrefix = event.allDay
+    ? null
+    : format(parseISO(event.start), "h:mma").replace(":00", "").toLowerCase();
+
+  return (
+    <span
+      title={
+        timePrefix ? `${timePrefix} · ${event.title}` : event.title
+      }
+      className="block truncate rounded px-1 py-0.5 text-[10px] font-medium leading-snug text-neutral-800 sm:text-[11px]"
+      style={{
+        backgroundColor: tint(event.ownerColor),
+        boxShadow: `inset 2px 0 0 ${event.ownerColor}`,
+      }}
+    >
+      {timePrefix ? (
+        <>
+          <span className="text-neutral-500">{timePrefix}</span>{" "}
+          {event.title}
+        </>
+      ) : (
+        event.title
+      )}
+    </span>
   );
 }
 
@@ -310,12 +353,12 @@ function WeekAgenda({
               <span
                 className={cn(
                   "text-sm font-semibold",
-                  isToday(day) ? "text-neutral-900" : "text-neutral-500",
+                  isHouseholdToday(day) ? "text-neutral-900" : "text-neutral-500",
                 )}
               >
                 {format(day, "EEE d")}
               </span>
-              {isToday(day) && (
+              {isHouseholdToday(day) && (
                 <span className="rounded-full bg-neutral-900 px-1.5 py-0.5 text-[10px] text-white">
                   Today
                 </span>

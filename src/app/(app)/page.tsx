@@ -5,7 +5,6 @@ import {
   format,
   isSameDay,
   parseISO,
-  startOfDay,
 } from "date-fns";
 import {
   CheckSquare,
@@ -19,6 +18,7 @@ import {
   Clock,
 } from "lucide-react";
 import { getHousehold } from "@/lib/auth";
+import { formatDateKey, parseLocalDateKey, HOUSEHOLD_TIMEZONE } from "@/lib/timezone";
 import { createClient } from "@/lib/supabase/server";
 import { fetchHouseholdEvents } from "@/lib/google";
 import {
@@ -53,18 +53,25 @@ import type {
 export const metadata = { title: "Home" };
 
 function occursOn(day: Date, ev: CalendarEvent) {
+  const dayKey = format(day, "yyyy-MM-dd");
   if (ev.allDay) {
-    const s = startOfDay(parseISO(ev.start));
-    const e = startOfDay(parseISO(ev.end));
-    return day >= s && day < e;
+    const startKey = ev.start.slice(0, 10);
+    const endKey = ev.end.slice(0, 10);
+    return dayKey >= startKey && dayKey < endKey;
   }
   return isSameDay(day, parseISO(ev.start));
 }
 
-function greeting() {
-  const h = new Date().getHours();
-  if (h < 12) return "Good morning";
-  if (h < 18) return "Good afternoon";
+function greeting(now = new Date()) {
+  const hour = Number(
+    new Intl.DateTimeFormat("en-US", {
+      timeZone: HOUSEHOLD_TIMEZONE,
+      hour: "numeric",
+      hour12: false,
+    }).format(now),
+  );
+  if (hour < 12) return "Good morning";
+  if (hour < 18) return "Good afternoon";
   return "Good evening";
 }
 
@@ -73,9 +80,10 @@ export default async function DashboardPage() {
   const supabase = await createClient();
 
   const now = new Date();
-  const today = startOfDay(now);
-  const todayStr = format(today, "yyyy-MM-dd");
-  const todayDow = now.getDay();
+  const todayKey = formatDateKey(now);
+  const today = parseLocalDateKey(todayKey);
+  const todayStr = todayKey;
+  const todayDow = today.getDay();
   const month = monthKey();
 
   const weekEnd = endOfWeek(now, { weekStartsOn: 0 });
@@ -172,7 +180,12 @@ export default async function DashboardPage() {
           {me ? `, ${me.display_name}` : ""}.
         </h1>
         <p className="mt-0.5 text-sm text-neutral-500">
-          {format(now, "EEEE, MMMM d")}
+          {new Intl.DateTimeFormat("en-US", {
+            timeZone: HOUSEHOLD_TIMEZONE,
+            weekday: "long",
+            month: "long",
+            day: "numeric",
+          }).format(now)}
         </p>
       </div>
 
