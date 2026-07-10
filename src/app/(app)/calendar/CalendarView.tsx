@@ -33,10 +33,11 @@ function tint(hex: string) {
 }
 
 function occursOn(day: Date, ev: CalendarEvent) {
+  if (!ev.start) return false;
   const dayKey = format(day, "yyyy-MM-dd");
   if (ev.allDay) {
     const startKey = ev.start.slice(0, 10);
-    const endKey = ev.end.slice(0, 10);
+    const endKey = (ev.end ?? ev.start).slice(0, 10);
     return dayKey >= startKey && dayKey < endKey;
   }
   return isSameDay(day, parseISO(ev.start));

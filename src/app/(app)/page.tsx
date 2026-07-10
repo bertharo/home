@@ -18,7 +18,7 @@ import {
   Clock,
 } from "lucide-react";
 import { getHousehold } from "@/lib/auth";
-import { formatDateKey, parseLocalDateKey, HOUSEHOLD_TIMEZONE } from "@/lib/timezone";
+import { formatDateKey, parseLocalDateKey, getHouseholdTimezone, householdHour, parseDateKey } from "@/lib/timezone";
 import { createClient } from "@/lib/supabase/server";
 import { fetchHouseholdEvents } from "@/lib/google";
 import {
@@ -34,7 +34,6 @@ import type {
 } from "@/lib/budget";
 import {
   formatCurrency,
-  monthKey,
   monthLabel,
   timeAgo,
   cn,
@@ -53,23 +52,18 @@ import type {
 export const metadata = { title: "Home" };
 
 function occursOn(day: Date, ev: CalendarEvent) {
+  if (!ev.start) return false;
   const dayKey = format(day, "yyyy-MM-dd");
   if (ev.allDay) {
     const startKey = ev.start.slice(0, 10);
-    const endKey = ev.end.slice(0, 10);
+    const endKey = (ev.end ?? ev.start).slice(0, 10);
     return dayKey >= startKey && dayKey < endKey;
   }
   return isSameDay(day, parseISO(ev.start));
 }
 
 function greeting(now = new Date()) {
-  const hour = Number(
-    new Intl.DateTimeFormat("en-US", {
-      timeZone: HOUSEHOLD_TIMEZONE,
-      hour: "numeric",
-      hour12: false,
-    }).format(now),
-  );
+  const hour = householdHour(now);
   if (hour < 12) return "Good morning";
   if (hour < 18) return "Good afternoon";
   return "Good evening";
@@ -84,9 +78,10 @@ export default async function DashboardPage() {
   const today = parseLocalDateKey(todayKey);
   const todayStr = todayKey;
   const todayDow = today.getDay();
-  const month = monthKey();
+  const month = todayKey.slice(0, 7);
+  const nowYM = parseDateKey(todayKey);
 
-  const weekEnd = endOfWeek(now, { weekStartsOn: 0 });
+  const weekEnd = endOfWeek(today, { weekStartsOn: 0 });
 
   const [
     todosRes,
@@ -108,7 +103,7 @@ export default async function DashboardPage() {
     supabase
       .from("goals")
       .select("*")
-      .eq("year", now.getFullYear())
+      .eq("year", nowYM.year)
       .neq("status", "done")
       .order("updated_at", { ascending: true }),
     supabase.from("budget_categories").select("*"),
@@ -150,16 +145,17 @@ export default async function DashboardPage() {
     toOverride,
   );
 
-  const nowYM = { year: now.getFullYear(), month: now.getMonth() + 1 };
-  const budgetReady = !!budgetSettingsRow?.onboarded;
-  const budgetCol = budgetReady
-    ? computeForecast(
-        budgetCategories,
-        budgetOverrides,
-        toSettings(budgetSettingsRow),
-        { now: nowYM },
-      ).find((c) => c.year === nowYM.year && c.month === nowYM.month) ?? null
-    : null;
+  const budgetReady = Boolean(budgetSettingsRow?.onboarded);
+  const budgetCol =
+    budgetReady && budgetSettingsRow
+      ? computeForecast(
+          budgetCategories,
+          budgetOverrides,
+          toSettings(budgetSettingsRow),
+          { now: nowYM },
+        ).find((c) => c.year === nowYM.year && c.month === nowYM.month) ??
+        null
+      : null;
 
   const todayEvents = events
     .filter((e) => occursOn(today, e))
@@ -181,7 +177,7 @@ export default async function DashboardPage() {
         </h1>
         <p className="mt-0.5 text-sm text-neutral-500">
           {new Intl.DateTimeFormat("en-US", {
-            timeZone: HOUSEHOLD_TIMEZONE,
+            timeZone: getHouseholdTimezone(),
             weekday: "long",
             month: "long",
             day: "numeric",
