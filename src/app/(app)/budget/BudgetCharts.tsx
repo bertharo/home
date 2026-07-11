@@ -14,7 +14,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { formatCents, compactCents } from "@/lib/utils";
+import { formatCents, compactCents, monthLabel } from "@/lib/utils";
 import type { CategoryRow, Column } from "./BudgetView";
 
 const PALETTE = [
@@ -24,8 +24,73 @@ const PALETTE = [
 const OTHER_COLOR = "#d4d4d4";
 
 function xLabel(col: Column): string {
-  return col.isYearStart ? `${col.label} '${String(col.year).slice(2)}` : col.label;
+  if (col.isYearStart) {
+    return `${col.label} '${String(col.year).slice(2)}`;
+  }
+  return col.label;
 }
+
+/** Y-axis range: include zero when relevant, add padding so the line isn't flattened. */
+function balanceDomain(data: { remaining: number }[]): [number, number] {
+  if (data.length === 0) return [0, 1];
+  let min = data[0].remaining;
+  let max = data[0].remaining;
+  for (const d of data) {
+    min = Math.min(min, d.remaining);
+    max = Math.max(max, d.remaining);
+  }
+  const span = max - min || Math.abs(max) * 0.1 || 100_000;
+  const pad = span * 0.08;
+  const floor = min >= 0 && min > span * 0.25 ? min - pad : Math.min(0, min - pad);
+  return [floor, max + pad];
+}
+
+function BalanceTooltip({
+  active,
+  payload,
+}: {
+  active?: boolean;
+  payload?: { payload: TrajectoryPoint }[];
+}) {
+  if (!active || !payload?.[0]?.payload) return null;
+  const p = payload[0].payload;
+  return (
+    <div className="rounded-xl border border-neutral-200 bg-white px-3 py-2 text-xs shadow-md">
+      <p className="font-semibold text-neutral-900">
+        {monthLabel(p.key)}
+        {p.isProjection && (
+          <span className="ml-1.5 font-normal text-neutral-400">projected</span>
+        )}
+      </p>
+      <p className="mt-1 text-sm font-semibold tabular-nums text-neutral-900">
+        {formatCents(p.remaining, { cents: true })}
+      </p>
+      <p className="mt-0.5 text-neutral-500">
+        {formatCents(p.revenue, { cents: true })} in ·{" "}
+        {formatCents(p.expenses, { cents: true })} out
+      </p>
+      <p
+        className={
+          "mt-0.5 tabular-nums " +
+          (p.net >= 0 ? "text-emerald-600" : "text-red-600")
+        }
+      >
+        {p.net >= 0 ? "+" : ""}
+        {formatCents(p.net, { cents: true })} net
+      </p>
+    </div>
+  );
+}
+
+type TrajectoryPoint = {
+  key: string;
+  label: string;
+  remaining: number;
+  revenue: number;
+  expenses: number;
+  net: number;
+  isProjection: boolean;
+};
 
 function buildComposition(
   rows: CategoryRow[],
@@ -75,14 +140,20 @@ export function BudgetCharts({
 }) {
   const tickInterval = columns.length <= 14 ? 0 : Math.floor(columns.length / 12);
 
-  const trajectory = useMemo(
-    () =>
-      columns.map((c) => ({
-        label: xLabel(c),
-        remaining: c.remaining,
-      })),
-    [columns],
-  );
+  const trajectory = useMemo((): TrajectoryPoint[] => {
+    const points = columns.map((c) => ({
+      key: c.key,
+      label: xLabel(c),
+      remaining: c.remaining,
+      revenue: c.revenue,
+      expenses: c.expenses,
+      net: c.net,
+      isProjection: c.isProjection,
+    }));
+    return points;
+  }, [columns]);
+
+  const yDomain = useMemo(() => balanceDomain(trajectory), [trajectory]);
 
   const cashflow = useMemo(
     () =>
@@ -135,18 +206,18 @@ export function BudgetCharts({
                 fontSize={11}
                 stroke="#a3a3a3"
                 width={52}
+                domain={yDomain}
                 tickFormatter={(v) => compactCents(Number(v))}
               />
-              <Tooltip
-                contentStyle={tooltipStyle}
-                formatter={(v) => [formatCents(Number(v)), "Remaining"]}
-              />
+              <Tooltip content={<BalanceTooltip />} />
               <Area
-                type="monotone"
+                type="linear"
                 dataKey="remaining"
                 stroke="#171717"
                 strokeWidth={2}
                 fill="url(#balFill)"
+                dot={false}
+                activeDot={{ r: 3, fill: "#171717" }}
               />
             </AreaChart>
           </ResponsiveContainer>
@@ -184,7 +255,7 @@ export function BudgetCharts({
               />
               <Bar dataKey="Revenue" fill="#34d399" radius={[3, 3, 0, 0]} maxBarSize={16} />
               <Bar dataKey="Expenses" fill="#fca5a5" radius={[3, 3, 0, 0]} maxBarSize={16} />
-              <Line type="monotone" dataKey="Net" stroke="#171717" strokeWidth={2} dot={false} />
+              <Line type="linear" dataKey="Net" stroke="#171717" strokeWidth={2} dot={false} />
             </ComposedChart>
           </ResponsiveContainer>
         </div>

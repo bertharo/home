@@ -17,6 +17,7 @@ import type {
   BudgetSettingsRow,
 } from "@/lib/budget";
 import { PageHeader } from "@/components/ui/PageHeader";
+import { formatDateKey, parseDateKey } from "@/lib/timezone";
 import { BudgetOnboarding } from "./BudgetOnboarding";
 import { BudgetView, type Column, type CategoryRow } from "./BudgetView";
 
@@ -48,8 +49,7 @@ export default async function BudgetPage() {
   const categoryRows = (categoryData ?? []) as BudgetCategoryRow[];
   const overrideRows = (overrideData ?? []) as BudgetOverrideRow[];
 
-  const now = new Date();
-  const nowYM = { year: now.getFullYear(), month: now.getMonth() + 1 };
+  const nowYM = parseDateKey(formatDateKey());
 
   // First run (or explicitly not onboarded) -> wizard.
   if (!settingsRow || !settingsRow.onboarded) {
@@ -67,7 +67,7 @@ export default async function BudgetPage() {
     );
   }
 
-  const settings = toSettings(settingsRow) ?? defaultSettings(now);
+  const settings = toSettings(settingsRow) ?? defaultSettings();
   const categories: BudgetCategory[] = categoryRows.map(toCategory);
   const overrides = overrideRows.map(toOverride);
 
