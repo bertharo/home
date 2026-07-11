@@ -5,9 +5,9 @@ import { Plus } from "lucide-react";
 import { formatCents, parseMoneyToCents } from "@/lib/utils";
 import type { CategoryRow, Column } from "./BudgetView";
 import { CategorySettings } from "./CategorySettings";
+import { CellApplySheet } from "./CellApplySheet";
 import {
   addCategory,
-  setOverride,
   clearOverride,
   updateCategory,
 } from "./actions";
@@ -40,8 +40,8 @@ export function BudgetGrid({
       <div className="border-b border-neutral-100 px-4 py-3">
         <h2 className="text-sm font-semibold text-neutral-700">Forecast grid</h2>
         <p className="text-xs text-neutral-400">
-          Tap a cell to set that month. Overridden cells show a dot — tap the dot
-          to reset to the category default.
+          Tap a cell to edit. Choose this month only, copy forward, or update
+          the default. Overridden cells show a blue dot — tap it to reset.
         </p>
       </div>
 
@@ -193,20 +193,24 @@ function GridCell({
   const cell = row.cells[cellIndex];
   const [editing, setEditing] = useState(false);
   const [text, setText] = useState("");
+  const [applyAmount, setApplyAmount] = useState<number | null>(null);
   const [, start] = useTransition();
 
   const def = defaultResolved(row, col.month);
 
-  function commit() {
+  function finishEdit() {
     setEditing(false);
     const next = parseMoneyToCents(text);
     if (next === cell.amount) return;
+
+    // Matches the category default → drop override for this month.
     if (next === def) {
       if (cell.overridden)
         start(() => clearOverride(row.id, col.year, col.month));
       return;
     }
-    start(() => setOverride(row.id, col.year, col.month, next));
+
+    setApplyAmount(next);
   }
 
   const bg = col.isCurrent
@@ -215,55 +219,64 @@ function GridCell({
       ? "bg-white"
       : "bg-white";
 
-  if (editing) {
-    return (
-      <td className={`${VALUE_COL} ${bg} p-0`}>
-        <input
-          autoFocus
-          inputMode="decimal"
-          defaultValue={cell.amount ? String(cell.amount / 100) : ""}
-          onChange={(e) => setText(e.target.value)}
-          onBlur={commit}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") (e.target as HTMLInputElement).blur();
-            if (e.key === "Escape") {
-              setText("");
-              setEditing(false);
-            }
-          }}
-          className="w-full bg-white px-2 py-1.5 text-right text-xs tabular-nums outline-none ring-2 ring-inset ring-neutral-900"
-        />
-      </td>
-    );
-  }
-
   return (
-    <td className={`${VALUE_COL} ${bg}`}>
-      <div className="relative">
-        <button
-          onClick={() => {
-            setText(cell.amount ? String(cell.amount / 100) : "");
-            setEditing(true);
-          }}
-          className={
-            "w-full px-2 py-1.5 text-right text-xs tabular-nums transition hover:bg-neutral-100 " +
-            (cell.amount ? "text-neutral-700" : "text-neutral-300")
-          }
-        >
-          {cell.amount ? formatCents(cell.amount, { cents: true }) : "—"}
-        </button>
-        {cell.overridden && (
-          <button
-            onClick={() =>
-              start(() => clearOverride(row.id, col.year, col.month))
-            }
-            title="Reset to default"
-            className="absolute right-0.5 top-0.5 h-1.5 w-1.5 rounded-full bg-blue-500"
-            aria-label="Reset to default"
+    <>
+      {applyAmount !== null && (
+        <CellApplySheet
+          row={row}
+          col={col}
+          amountCents={applyAmount}
+          onClose={() => setApplyAmount(null)}
+        />
+      )}
+
+      {editing ? (
+        <td className={`${VALUE_COL} ${bg} p-0`}>
+          <input
+            autoFocus
+            inputMode="decimal"
+            defaultValue={cell.amount ? String(cell.amount / 100) : ""}
+            onChange={(e) => setText(e.target.value)}
+            onBlur={finishEdit}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+              if (e.key === "Escape") {
+                setText("");
+                setEditing(false);
+              }
+            }}
+            className="w-full bg-white px-2 py-1.5 text-right text-xs tabular-nums outline-none ring-2 ring-inset ring-neutral-900"
           />
-        )}
-      </div>
-    </td>
+        </td>
+      ) : (
+        <td className={`${VALUE_COL} ${bg}`}>
+          <div className="relative">
+            <button
+              onClick={() => {
+                setText(cell.amount ? String(cell.amount / 100) : "");
+                setEditing(true);
+              }}
+              className={
+                "w-full px-2 py-1.5 text-right text-xs tabular-nums transition hover:bg-neutral-100 " +
+                (cell.amount ? "text-neutral-700" : "text-neutral-300")
+              }
+            >
+              {cell.amount ? formatCents(cell.amount, { cents: true }) : "—"}
+            </button>
+            {cell.overridden && (
+              <button
+                onClick={() =>
+                  start(() => clearOverride(row.id, col.year, col.month))
+                }
+                title="Reset to default"
+                className="absolute right-0.5 top-0.5 h-1.5 w-1.5 rounded-full bg-blue-500"
+                aria-label="Reset to default"
+              />
+            )}
+          </div>
+        </td>
+      )}
+    </>
   );
 }
 
