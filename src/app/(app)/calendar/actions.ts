@@ -1,8 +1,12 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
+import { revalidatePath, updateTag } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
-import { createEventForUser, createFamilyEvent } from "@/lib/google";
+import {
+  createEventForUser,
+  createFamilyEvent,
+  HOUSEHOLD_EVENTS_TAG,
+} from "@/lib/google";
 
 async function currentUserId() {
   const supabase = await createClient();
@@ -55,6 +59,7 @@ export async function createCalendarEvent(formData: FormData) {
     return { ok: false, error: "Could not create event on Google Calendar." };
   }
 
+  updateTag(HOUSEHOLD_EVENTS_TAG);
   revalidatePath("/calendar");
   revalidatePath("/");
   return { ok: true };
@@ -67,5 +72,6 @@ export async function disconnectGoogle() {
   } = await supabase.auth.getUser();
   if (!user) return;
   await supabase.from("google_accounts").delete().eq("user_id", user.id);
+  updateTag(HOUSEHOLD_EVENTS_TAG);
   revalidatePath("/calendar");
 }

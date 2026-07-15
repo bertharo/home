@@ -85,9 +85,10 @@ export function CalendarView({
     return eachDayOfInterval({ start: s, end: e });
   }, [view, dateStr]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const selectedEvents = events
-    .filter((e) => occursOn(selected, e))
-    .sort(sortEvents);
+  const selectedEvents = useMemo(
+    () => events.filter((e) => occursOn(selected, e)).sort(sortEvents),
+    [events, selected],
+  );
 
   const title =
     view === "week"

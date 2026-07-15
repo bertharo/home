@@ -1,7 +1,16 @@
+import { unstable_cache } from "next/cache";
 import { google } from "googleapis";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { resolveSiteUrl } from "@/lib/env";
 import type { CalendarEvent, Profile } from "@/lib/types";
+
+/**
+ * Cache tag for household calendar events. Bust it (revalidateTag) whenever a
+ * member connects/disconnects Google or creates an event so changes appear
+ * immediately instead of waiting out the TTL.
+ */
+export const HOUSEHOLD_EVENTS_TAG = "household-events";
+const EVENTS_CACHE_TTL_SECONDS = 60;
 
 export const GOOGLE_SCOPES = [
   "https://www.googleapis.com/auth/calendar",
@@ -64,6 +73,34 @@ async function authedClientFor(userId: string) {
   return { client, account };
 }
 
+/**
+ * Cap how long a single member's calendar fetch (token refresh + events list)
+ * may take. Without this, a slow/hung Google call or an expired-token refresh
+ * blocks the whole page for Node's default socket timeout (~1 minute). A member
+ * whose fetch times out simply contributes no events — identical to the
+ * existing behaviour when a member's fetch throws.
+ */
+const EVENT_FETCH_TIMEOUT_MS = 8000;
+
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new Error("google-calendar-timeout")),
+      ms,
+    );
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (err) => {
+        clearTimeout(timer);
+        reject(err);
+      },
+    );
+  });
+}
+
 /** Which household members have connected Google. */
 export async function connectedUserIds(): Promise<string[]> {
   const admin = createAdminClient();
@@ -74,6 +111,11 @@ export async function connectedUserIds(): Promise<string[]> {
 /**
  * Fetch and merge calendar events for every connected household member
  * within [timeMin, timeMax]. Color-coded by owner profile.
+ *
+ * Cached for a short window (keyed by member identity + range) so passive
+ * dashboard/calendar re-renders — e.g. the full-page revalidation triggered by
+ * toggling a todo — reuse events instead of re-hitting Google every time.
+ * Event mutations and connect/disconnect bust the cache via HOUSEHOLD_EVENTS_TAG.
  */
 export async function fetchHouseholdEvents(
   profiles: Profile[],
@@ -82,50 +124,83 @@ export async function fetchHouseholdEvents(
 ): Promise<CalendarEvent[]> {
   if (!googleConfigured()) return [];
 
+  const cacheKey = [
+    "household-events",
+    profiles
+      .map((p) => `${p.id}:${p.color}:${p.display_name}`)
+      .sort()
+      .join(","),
+    timeMin.toISOString(),
+    timeMax.toISOString(),
+  ];
+
+  const cached = unstable_cache(
+    () => fetchHouseholdEventsUncached(profiles, timeMin, timeMax),
+    cacheKey,
+    { revalidate: EVENTS_CACHE_TTL_SECONDS, tags: [HOUSEHOLD_EVENTS_TAG] },
+  );
+
+  return cached();
+}
+
+async function fetchHouseholdEventsUncached(
+  profiles: Profile[],
+  timeMin: Date,
+  timeMax: Date,
+): Promise<CalendarEvent[]> {
   const results: CalendarEvent[] = [];
 
   await Promise.all(
     profiles.map(async (profile) => {
-      const authed = await authedClientFor(profile.id);
-      if (!authed) return;
-
       try {
-        const calendar = google.calendar({
-          version: "v3",
-          auth: authed.client,
-        });
-        const res = await calendar.events.list({
-          calendarId: authed.account.calendar_id || "primary",
-          timeMin: timeMin.toISOString(),
-          timeMax: timeMax.toISOString(),
-          singleEvents: true,
-          orderBy: "startTime",
-          maxResults: 250,
-        });
+        await withTimeout(
+          (async () => {
+            const authed = await authedClientFor(profile.id);
+            if (!authed) return;
 
-        for (const ev of res.data.items ?? []) {
-          if (ev.status === "cancelled") continue;
-          const start = ev.start?.dateTime ?? ev.start?.date;
-          const end = ev.end?.dateTime ?? ev.end?.date;
-          if (!start || !end) continue;
+            const calendar = google.calendar({
+              version: "v3",
+              auth: authed.client,
+            });
+            const res = await calendar.events.list(
+              {
+                calendarId: authed.account.calendar_id || "primary",
+                timeMin: timeMin.toISOString(),
+                timeMax: timeMax.toISOString(),
+                singleEvents: true,
+                orderBy: "startTime",
+                maxResults: 250,
+              },
+              { timeout: EVENT_FETCH_TIMEOUT_MS },
+            );
 
-          results.push({
-            id: `${profile.id}:${ev.id}`,
-            title: ev.summary ?? "(no title)",
-            start,
-            end,
-            allDay: Boolean(ev.start?.date),
-            ownerId: profile.id,
-            ownerColor: profile.color,
-            ownerName: profile.display_name,
-            location: ev.location ?? null,
-            isFamily: Boolean(
-              ev.extendedProperties?.private?.homeHubFamily === "1",
-            ),
-          });
-        }
+            for (const ev of res.data.items ?? []) {
+              if (ev.status === "cancelled") continue;
+              const start = ev.start?.dateTime ?? ev.start?.date;
+              const end = ev.end?.dateTime ?? ev.end?.date;
+              if (!start || !end) continue;
+
+              results.push({
+                id: `${profile.id}:${ev.id}`,
+                title: ev.summary ?? "(no title)",
+                start,
+                end,
+                allDay: Boolean(ev.start?.date),
+                ownerId: profile.id,
+                ownerColor: profile.color,
+                ownerName: profile.display_name,
+                location: ev.location ?? null,
+                isFamily: Boolean(
+                  ev.extendedProperties?.private?.homeHubFamily === "1",
+                ),
+              });
+            }
+          })(),
+          EVENT_FETCH_TIMEOUT_MS + 1000,
+        );
       } catch {
-        // A single member's fetch failing shouldn't break the whole view.
+        // A single member's fetch failing or timing out shouldn't break the
+        // whole view — that member simply contributes no events.
       }
     }),
   );

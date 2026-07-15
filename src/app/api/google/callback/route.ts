@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
+import { revalidateTag } from "next/cache";
 import { google } from "googleapis";
 import { getUser } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
-import { oauthClient } from "@/lib/google";
+import { oauthClient, HOUSEHOLD_EVENTS_TAG } from "@/lib/google";
 
 export async function GET(request: Request) {
   const { origin, searchParams } = new URL(request.url);
@@ -46,6 +47,7 @@ export async function GET(request: Request) {
       { onConflict: "user_id" },
     );
 
+    revalidateTag(HOUSEHOLD_EVENTS_TAG, { expire: 0 });
     return NextResponse.redirect(`${origin}/calendar?connected=1`);
   } catch {
     return NextResponse.redirect(`${origin}/calendar?error=oauth`);
