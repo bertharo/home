@@ -8,6 +8,7 @@ import {
   ShoppingCart,
   Repeat,
   Car,
+  Users,
   type LucideIcon,
 } from "lucide-react";
 
@@ -31,6 +32,7 @@ export const NAV_ITEMS: NavItem[] = [
   { href: "/grocery", label: "Grocery", icon: ShoppingCart },
   { href: "/chores", label: "Chores", icon: Repeat },
   { href: "/duties", label: "Pickups", icon: Car },
+  { href: "/household", label: "Household", icon: Users },
 ];
 
 // Budget categories (variable + fixed grouping is by `kind` on the row).

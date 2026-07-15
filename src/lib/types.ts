@@ -13,6 +13,26 @@ export type Profile = {
   email: string;
   display_name: string;
   color: string;
+  household_id: string | null;
+  created_at: string;
+};
+
+export type Household = {
+  id: string;
+  name: string;
+  created_by: string | null;
+  created_at: string;
+};
+
+export type Invite = {
+  id: string;
+  household_id: string;
+  email: string | null;
+  token: string;
+  invited_by: string | null;
+  expires_at: string;
+  accepted_at: string | null;
+  accepted_by: string | null;
   created_at: string;
 };
 

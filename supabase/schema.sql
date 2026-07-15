@@ -1,50 +1,69 @@
 -- ===========================================================================
--- Home — Postgres schema (run in Supabase SQL editor)
+-- Home — Postgres schema (run in Supabase SQL editor for a fresh install)
 -- ---------------------------------------------------------------------------
--- Model notes:
--- * Exactly two users share ALL data (a household). RLS therefore grants any
---   authenticated user full access; row `created_by` provides attribution and
---   `assignee_id` provides assignment. The two-user limit is enforced at the
---   auth/app layer (ALLOWED_EMAILS + no public signup).
+-- Multi-tenant model:
+-- * A `household` is the tenant boundary. Anyone can sign up; each user belongs
+--   to at most one household (profiles.household_id), joined by creating a new
+--   household or accepting an invite.
+-- * Every data row carries a `household_id`, defaulted to the caller's
+--   household via current_household_id() and enforced by RLS so households
+--   never see each other's data.
+-- * `created_by` / `assignee_id` provide attribution/assignment within a
+--   household.
 -- ===========================================================================
 
--- Needed for gen_random_uuid()
 create extension if not exists "pgcrypto";
 
 -- ---------------------------------------------------------------------------
--- profiles: one row per auth user, auto-created on signup
+-- households: the tenant. One row per shared home.
+-- ---------------------------------------------------------------------------
+create table if not exists public.households (
+  id         uuid primary key default gen_random_uuid(),
+  name       text not null default 'Our Home',
+  created_by uuid references auth.users(id) on delete set null,
+  created_at timestamptz not null default now()
+);
+
+-- ---------------------------------------------------------------------------
+-- profiles: one row per auth user, auto-created on signup. household_id is
+-- null until the user creates or joins a household during onboarding.
 -- ---------------------------------------------------------------------------
 create table if not exists public.profiles (
   id           uuid primary key references auth.users(id) on delete cascade,
   email        text not null,
   display_name text not null,
   color        text not null default '#2563eb',
+  household_id uuid references public.households(id) on delete set null,
   created_at   timestamptz not null default now()
 );
 
--- Auto-create a profile whenever a new auth user is created.
+-- Resolve the caller's household without tripping profiles' RLS (SECURITY
+-- DEFINER) — also used as the DEFAULT for household_id columns below.
+create or replace function public.current_household_id()
+returns uuid
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select household_id from public.profiles where id = auth.uid()
+$$;
+
+-- Auto-create a profile (no household yet) whenever a new auth user is created.
 create or replace function public.handle_new_user()
 returns trigger
 language plpgsql
 security definer set search_path = public
 as $$
-declare
-  existing_count int;
-  assigned_color text;
 begin
-  select count(*) into existing_count from public.profiles;
-  -- First user gets blue, second gets pink.
-  assigned_color := case when existing_count = 0 then '#2563eb' else '#db2777' end;
-
   insert into public.profiles (id, email, display_name, color)
   values (
     new.id,
     new.email,
     coalesce(split_part(new.email, '@', 1), 'Member'),
-    assigned_color
+    '#2563eb'
   )
   on conflict (id) do nothing;
-
   return new;
 end;
 $$;
@@ -55,10 +74,29 @@ create trigger on_auth_user_created
   for each row execute function public.handle_new_user();
 
 -- ---------------------------------------------------------------------------
+-- invites: share a link (or note an email) to let someone join a household.
+-- ---------------------------------------------------------------------------
+create table if not exists public.invites (
+  id           uuid primary key default gen_random_uuid(),
+  household_id uuid not null references public.households(id) on delete cascade,
+  email        text,
+  token        text not null unique default encode(gen_random_bytes(16), 'hex'),
+  invited_by   uuid references public.profiles(id) on delete set null,
+  expires_at   timestamptz not null default (now() + interval '14 days'),
+  accepted_at  timestamptz,
+  accepted_by  uuid references public.profiles(id) on delete set null,
+  created_at   timestamptz not null default now()
+);
+create index if not exists invites_token_idx on public.invites (token);
+create index if not exists invites_household_idx on public.invites (household_id);
+
+-- ---------------------------------------------------------------------------
 -- To-dos
 -- ---------------------------------------------------------------------------
 create table if not exists public.todos (
   id           uuid primary key default gen_random_uuid(),
+  household_id uuid not null default public.current_household_id()
+                 references public.households(id) on delete cascade,
   title        text not null,
   notes        text,
   status       text not null default 'open' check (status in ('open','done')),
@@ -69,12 +107,15 @@ create table if not exists public.todos (
   created_at   timestamptz not null default now(),
   completed_at timestamptz
 );
+create index if not exists todos_household_idx on public.todos (household_id);
 
 -- ---------------------------------------------------------------------------
--- Chores (recurring, with optional 2-person rotation)
+-- Chores (recurring, with optional rotation)
 -- ---------------------------------------------------------------------------
 create table if not exists public.chores (
   id                  uuid primary key default gen_random_uuid(),
+  household_id        uuid not null default public.current_household_id()
+                        references public.households(id) on delete cascade,
   title               text not null,
   notes               text,
   recurrence          text not null default 'weekly'
@@ -87,45 +128,48 @@ create table if not exists public.chores (
   created_by          uuid not null references public.profiles(id) on delete cascade,
   created_at          timestamptz not null default now()
 );
+create index if not exists chores_household_idx on public.chores (household_id);
 
 -- ---------------------------------------------------------------------------
 -- Grocery list
 -- ---------------------------------------------------------------------------
 create table if not exists public.grocery_items (
-  id         uuid primary key default gen_random_uuid(),
-  name       text not null,
-  section    text not null default 'Other',
-  qty        text,
-  checked    boolean not null default false,
-  created_by uuid not null references public.profiles(id) on delete cascade,
-  created_at timestamptz not null default now()
+  id           uuid primary key default gen_random_uuid(),
+  household_id uuid not null default public.current_household_id()
+                 references public.households(id) on delete cascade,
+  name         text not null,
+  section      text not null default 'Other',
+  qty          text,
+  checked      boolean not null default false,
+  created_by   uuid not null references public.profiles(id) on delete cascade,
+  created_at   timestamptz not null default now()
 );
+create index if not exists grocery_items_household_idx on public.grocery_items (household_id);
 
 -- ---------------------------------------------------------------------------
--- Pickup / drop-off duties (lightweight weekly schedule)
+-- Pickup / drop-off duties
 -- ---------------------------------------------------------------------------
 create table if not exists public.pickup_duties (
-  id          uuid primary key default gen_random_uuid(),
-  label       text not null,
-  day_of_week int not null check (day_of_week between 0 and 6),
-  assignee_id uuid references public.profiles(id) on delete set null,
-  notes       text,
-  created_by  uuid not null references public.profiles(id) on delete cascade,
-  created_at  timestamptz not null default now()
+  id           uuid primary key default gen_random_uuid(),
+  household_id uuid not null default public.current_household_id()
+                 references public.households(id) on delete cascade,
+  label        text not null,
+  day_of_week  int not null check (day_of_week between 0 and 6),
+  assignee_id  uuid references public.profiles(id) on delete set null,
+  notes        text,
+  created_by   uuid not null references public.profiles(id) on delete cascade,
+  created_at   timestamptz not null default now()
 );
+create index if not exists pickup_duties_household_idx on public.pickup_duties (household_id);
 
 -- ---------------------------------------------------------------------------
--- Budget: dynamic running-balance forecast.
---   * budget_settings   = singleton: opening balance, start month, horizon.
---   * budget_categories = revenue/expense sources with a default + cadence.
---   * budget_overrides  = per-(category, year, month) amount that supersedes
---                         the category default for that one month.
--- All money is stored as INTEGER CENTS (bigint) to avoid float drift across
--- long (60-month) balance chains. Balances are computed by the app engine
--- (src/lib/budget/engine.ts), never stored as source of truth.
+-- Budget: dynamic running-balance forecast (one settings row per household).
+-- All money stored as INTEGER CENTS (bigint). Balances are computed by the
+-- app engine, never stored as source of truth.
 -- ---------------------------------------------------------------------------
 create table if not exists public.budget_settings (
-  id               boolean primary key default true check (id),
+  household_id     uuid primary key default public.current_household_id()
+                     references public.households(id) on delete cascade,
   starting_balance bigint not null default 0, -- cents
   start_year       int not null,
   start_month      int not null check (start_month between 1 and 12),
@@ -136,6 +180,8 @@ create table if not exists public.budget_settings (
 
 create table if not exists public.budget_categories (
   id             uuid primary key default gen_random_uuid(),
+  household_id   uuid not null default public.current_household_id()
+                   references public.households(id) on delete cascade,
   name           text not null,
   kind           text not null check (kind in ('revenue','expense')),
   default_amount bigint not null default 0, -- cents
@@ -151,27 +197,35 @@ create table if not exists public.budget_categories (
 );
 create index if not exists budget_categories_kind_idx
   on public.budget_categories (kind, sort_order);
+create index if not exists budget_categories_household_idx
+  on public.budget_categories (household_id);
 
 create table if not exists public.budget_overrides (
-  id          uuid primary key default gen_random_uuid(),
-  category_id uuid not null references public.budget_categories(id) on delete cascade,
-  year        int not null,
-  month       int not null check (month between 1 and 12),
-  amount      bigint not null default 0, -- cents
-  created_by  uuid not null references public.profiles(id) on delete cascade,
-  updated_by  uuid references public.profiles(id) on delete set null,
-  created_at  timestamptz not null default now(),
-  updated_at  timestamptz not null default now(),
+  id           uuid primary key default gen_random_uuid(),
+  household_id uuid not null default public.current_household_id()
+                 references public.households(id) on delete cascade,
+  category_id  uuid not null references public.budget_categories(id) on delete cascade,
+  year         int not null,
+  month        int not null check (month between 1 and 12),
+  amount       bigint not null default 0, -- cents
+  created_by   uuid not null references public.profiles(id) on delete cascade,
+  updated_by   uuid references public.profiles(id) on delete set null,
+  created_at   timestamptz not null default now(),
+  updated_at   timestamptz not null default now(),
   unique (category_id, year, month)
 );
 create index if not exists budget_overrides_cat_idx
   on public.budget_overrides (category_id, year, month);
+create index if not exists budget_overrides_household_idx
+  on public.budget_overrides (household_id);
 
 -- ---------------------------------------------------------------------------
 -- Annual goals
 -- ---------------------------------------------------------------------------
 create table if not exists public.goals (
   id            uuid primary key default gen_random_uuid(),
+  household_id  uuid not null default public.current_household_id()
+                  references public.households(id) on delete cascade,
   title         text not null,
   description   text,
   kind          text not null default 'joint' check (kind in ('individual','joint')),
@@ -184,12 +238,15 @@ create table if not exists public.goals (
   created_at    timestamptz not null default now(),
   updated_at    timestamptz not null default now()
 );
+create index if not exists goals_household_idx on public.goals (household_id);
 
 -- ---------------------------------------------------------------------------
--- Vacation ideas + links + photos
+-- Vacation ideas + links + photos (links/photos inherit isolation via idea)
 -- ---------------------------------------------------------------------------
 create table if not exists public.vacation_ideas (
   id           uuid primary key default gen_random_uuid(),
+  household_id uuid not null default public.current_household_id()
+                 references public.households(id) on delete cascade,
   title        text not null,
   notes        text,
   rough_cost   numeric(12,2),
@@ -199,6 +256,7 @@ create table if not exists public.vacation_ideas (
   created_by   uuid not null references public.profiles(id) on delete cascade,
   created_at   timestamptz not null default now()
 );
+create index if not exists vacation_ideas_household_idx on public.vacation_ideas (household_id);
 
 create table if not exists public.vacation_links (
   id         uuid primary key default gen_random_uuid(),
@@ -229,12 +287,11 @@ create table if not exists public.google_accounts (
 );
 
 -- ===========================================================================
--- Row Level Security
--- ---------------------------------------------------------------------------
--- Two trusted users share everything -> any authenticated user has full CRUD.
--- google_accounts is the exception: users only see/write their own tokens.
+-- Row Level Security — household isolation.
 -- ===========================================================================
 
+alter table public.households            enable row level security;
+alter table public.invites               enable row level security;
 alter table public.profiles              enable row level security;
 alter table public.todos                 enable row level security;
 alter table public.chores                enable row level security;
@@ -249,23 +306,80 @@ alter table public.vacation_links        enable row level security;
 alter table public.vacation_photos       enable row level security;
 alter table public.google_accounts       enable row level security;
 
--- Helper: create "authenticated users can do everything" policies.
+-- Data tables that carry household_id directly.
 do $$
 declare
   t text;
-  shared_tables text[] := array[
-    'profiles','todos','chores','grocery_items','pickup_duties',
-    'budget_settings','budget_categories','budget_overrides','goals',
-    'vacation_ideas','vacation_links','vacation_photos'
+  scoped_tables text[] := array[
+    'todos','chores','grocery_items','pickup_duties',
+    'budget_settings','budget_categories','budget_overrides',
+    'goals','vacation_ideas'
   ];
 begin
-  foreach t in array shared_tables loop
-    execute format('drop policy if exists "authenticated_all" on public.%I;', t);
+  foreach t in array scoped_tables loop
+    execute format('drop policy if exists "household_isolation" on public.%I;', t);
     execute format(
-      'create policy "authenticated_all" on public.%I
-         for all to authenticated using (true) with check (true);', t);
+      'create policy "household_isolation" on public.%I
+         for all to authenticated
+         using (household_id = public.current_household_id())
+         with check (household_id = public.current_household_id());', t);
   end loop;
 end $$;
+
+-- vacation_links / vacation_photos: isolate via parent idea's household.
+do $$
+declare
+  t text;
+begin
+  foreach t in array array['vacation_links','vacation_photos'] loop
+    execute format('drop policy if exists "household_isolation" on public.%I;', t);
+    execute format(
+      'create policy "household_isolation" on public.%I
+         for all to authenticated
+         using (exists (
+           select 1 from public.vacation_ideas i
+           where i.id = %I.idea_id
+             and i.household_id = public.current_household_id()))
+         with check (exists (
+           select 1 from public.vacation_ideas i
+           where i.id = %I.idea_id
+             and i.household_id = public.current_household_id()));',
+      t, t, t);
+  end loop;
+end $$;
+
+-- profiles: visible within your household; always see + update yourself.
+drop policy if exists "profiles_read" on public.profiles;
+drop policy if exists "profiles_self_update" on public.profiles;
+create policy "profiles_read" on public.profiles
+  for select to authenticated
+  using (id = auth.uid() or household_id = public.current_household_id());
+create policy "profiles_self_update" on public.profiles
+  for update to authenticated
+  using (id = auth.uid())
+  with check (id = auth.uid());
+
+-- households: members read; owner writes; any authenticated user can create.
+drop policy if exists "households_read" on public.households;
+drop policy if exists "households_insert" on public.households;
+drop policy if exists "households_owner_write" on public.households;
+create policy "households_read" on public.households
+  for select to authenticated
+  using (id = public.current_household_id() or created_by = auth.uid());
+create policy "households_insert" on public.households
+  for insert to authenticated
+  with check (created_by = auth.uid());
+create policy "households_owner_write" on public.households
+  for update to authenticated
+  using (created_by = auth.uid())
+  with check (created_by = auth.uid());
+
+-- invites: members manage their household's invites (accept happens server-side).
+drop policy if exists "invites_household" on public.invites;
+create policy "invites_household" on public.invites
+  for all to authenticated
+  using (household_id = public.current_household_id())
+  with check (household_id = public.current_household_id());
 
 -- google_accounts: owner-only
 drop policy if exists "own_google_account" on public.google_accounts;
@@ -274,7 +388,9 @@ create policy "own_google_account" on public.google_accounts
   using (user_id = auth.uid())
   with check (user_id = auth.uid());
 
--- Keep goals.updated_at fresh
+-- ---------------------------------------------------------------------------
+-- updated_at touch triggers
+-- ---------------------------------------------------------------------------
 create or replace function public.touch_updated_at()
 returns trigger language plpgsql as $$
 begin

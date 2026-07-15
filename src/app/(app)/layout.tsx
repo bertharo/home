@@ -1,3 +1,4 @@
+import { redirect } from "next/navigation";
 import { requireUser, getCurrentProfile } from "@/lib/auth";
 import { DesktopSidebar } from "@/components/nav/DesktopSidebar";
 import { MobileTopBar } from "@/components/nav/MobileTopBar";
@@ -11,6 +12,9 @@ export default async function AppLayout({
 }) {
   await requireUser();
   const me = await getCurrentProfile();
+
+  // No household yet -> send through onboarding before showing the app.
+  if (!me?.household_id) redirect("/welcome");
 
   return (
     <div className="flex min-h-dvh">

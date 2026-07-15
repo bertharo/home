@@ -9,6 +9,7 @@ import {
   type CategoryKind,
 } from "@/lib/budget";
 import type { BudgetSettingsRow } from "@/lib/budget";
+import { getMyHouseholdId } from "@/lib/auth";
 
 async function ctx() {
   const supabase = await createClient();
@@ -17,6 +18,12 @@ async function ctx() {
   } = await supabase.auth.getUser();
   if (!user) throw new Error("Not authenticated");
   return { supabase, userId: user.id };
+}
+
+async function requireHouseholdId() {
+  const householdId = await getMyHouseholdId();
+  if (!householdId) throw new Error("No household");
+  return householdId;
 }
 
 function refresh() {
@@ -37,13 +44,14 @@ export async function saveSettings(input: {
   horizonMonths?: number;
 }) {
   const { supabase } = await ctx();
+  const householdId = await requireHouseholdId();
   const { data: existing } = await supabase
     .from("budget_settings")
     .select("*")
     .maybeSingle();
 
   const row = {
-    id: true,
+    household_id: householdId,
     starting_balance:
       input.startingBalanceCents !== undefined
         ? asCents(input.startingBalanceCents)
@@ -55,7 +63,9 @@ export async function saveSettings(input: {
     onboarded: existing?.onboarded ?? false,
   };
 
-  await supabase.from("budget_settings").upsert(row, { onConflict: "id" });
+  await supabase
+    .from("budget_settings")
+    .upsert(row, { onConflict: "household_id" });
   refresh();
 }
 
@@ -83,23 +93,25 @@ export async function completeOnboarding(input: {
   categories: OnboardCategoryInput[];
 }) {
   const { supabase, userId } = await ctx();
+  const householdId = await requireHouseholdId();
 
   await supabase.from("budget_settings").upsert(
     {
-      id: true,
+      household_id: householdId,
       starting_balance: asCents(input.startingBalanceCents),
       start_year: input.startYear,
       start_month: input.startMonth,
       horizon_months: input.horizonMonths,
       onboarded: true,
     },
-    { onConflict: "id" },
+    { onConflict: "household_id" },
   );
 
   const clean = input.categories.filter((c) => c.name.trim());
   if (clean.length > 0) {
     const counters: Record<string, number> = { revenue: 0, expense: 0 };
     const rows = clean.map((c) => ({
+      household_id: householdId,
       name: c.name.trim(),
       kind: c.kind,
       default_amount: asCents(c.amountCents),
@@ -121,16 +133,17 @@ export async function skipOnboarding(input: {
   startMonth: number;
 }) {
   const { supabase } = await ctx();
+  const householdId = await requireHouseholdId();
   await supabase.from("budget_settings").upsert(
     {
-      id: true,
+      household_id: householdId,
       starting_balance: 0,
       start_year: input.startYear,
       start_month: input.startMonth,
       horizon_months: 24,
       onboarded: true,
     },
-    { onConflict: "id" },
+    { onConflict: "household_id" },
   );
   refresh();
 }

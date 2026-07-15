@@ -1,7 +1,12 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
-const PUBLIC_PATHS = ["/login", "/auth/callback", "/auth/auth-code-error"];
+const PUBLIC_PATHS = [
+  "/login",
+  "/join",
+  "/auth/callback",
+  "/auth/auth-code-error",
+];
 
 /**
  * Refreshes the Supabase session on every request and enforces auth:

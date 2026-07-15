@@ -11,7 +11,7 @@ import type {
 // --------------------------------------------------------------------------
 
 export interface BudgetSettingsRow {
-  id: boolean;
+  household_id: string;
   starting_balance: number | string;
   start_year: number;
   start_month: number;
