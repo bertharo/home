@@ -6,7 +6,7 @@ import { APP_NAME } from "@/lib/constants";
 import { resolveSiteUrl } from "@/lib/env";
 import { Home, Loader2, MailCheck } from "lucide-react";
 
-type Mode = "password" | "signup" | "magic";
+type Mode = "password" | "signup" | "magic" | "forgot";
 
 function nextTarget(): string {
   if (typeof window === "undefined") return "/";
@@ -97,6 +97,30 @@ export default function LoginPage() {
     }
   }
 
+  async function handleForgot(e: React.FormEvent) {
+    e.preventDefault();
+    setStatus("sending");
+    setMessage(null);
+
+    const supabase = createClient();
+    const siteUrl = resolveSiteUrl(window.location.origin);
+
+    const { error } = await supabase.auth.resetPasswordForEmail(
+      email.trim().toLowerCase(),
+      {
+        redirectTo: `${siteUrl}/auth/callback?next=${encodeURIComponent("/auth/reset-password")}`,
+      },
+    );
+
+    if (error) {
+      setStatus("error");
+      setMessage(friendlyError(error.message));
+      return;
+    }
+
+    setStatus("sent");
+  }
+
   async function handleMagic(e: React.FormEvent) {
     e.preventDefault();
     setStatus("sending");
@@ -134,16 +158,21 @@ export default function LoginPage() {
       ? handlePassword
       : mode === "signup"
         ? handleSignup
-        : handleMagic;
+        : mode === "forgot"
+          ? handleForgot
+          : handleMagic;
 
   const submitLabel =
     mode === "password"
       ? "Sign in"
       : mode === "signup"
         ? "Create account"
-        : "Send magic link";
+        : mode === "forgot"
+          ? "Send reset link"
+          : "Send magic link";
 
-  const sendingLabel = mode === "magic" ? "Sending…" : "Working…";
+  const sendingLabel =
+    mode === "magic" || mode === "forgot" ? "Sending…" : "Working…";
 
   return (
     <main className="flex min-h-dvh flex-col items-center justify-center bg-neutral-50 px-6">
@@ -167,9 +196,19 @@ export default function LoginPage() {
               Check your email
             </h2>
             <p className="mt-1 text-sm text-neutral-500">
-              We sent a link to{" "}
-              <span className="font-medium text-neutral-700">{email}</span>.
-              Open it on this device to continue.
+              {mode === "forgot" ? (
+                <>
+                  If an account exists for{" "}
+                  <span className="font-medium text-neutral-700">{email}</span>,
+                  we sent a link to reset your password.
+                </>
+              ) : (
+                <>
+                  We sent a link to{" "}
+                  <span className="font-medium text-neutral-700">{email}</span>.
+                  Open it on this device to continue.
+                </>
+              )}
             </p>
             <button
               onClick={() => switchMode("password")}
@@ -201,7 +240,7 @@ export default function LoginPage() {
               className="w-full rounded-xl border border-neutral-300 bg-white px-4 py-3 text-base text-neutral-900 outline-none transition focus:border-neutral-900 focus:ring-2 focus:ring-neutral-900/10"
             />
 
-            {mode !== "magic" && (
+            {mode !== "magic" && mode !== "forgot" && (
               <>
                 <label
                   htmlFor="password"
@@ -226,6 +265,15 @@ export default function LoginPage() {
                     At least 6 characters.
                   </p>
                 )}
+                {mode === "password" && (
+                  <button
+                    type="button"
+                    onClick={() => switchMode("forgot")}
+                    className="mt-2 text-sm font-medium text-neutral-500 underline underline-offset-4"
+                  >
+                    Forgot password?
+                  </button>
+                )}
               </>
             )}
 
@@ -248,7 +296,15 @@ export default function LoginPage() {
             </button>
 
             <div className="mt-4 space-y-2 text-center">
-              {mode === "password" ? (
+              {mode === "forgot" ? (
+                <button
+                  type="button"
+                  onClick={() => switchMode("password")}
+                  className="block w-full text-sm font-medium text-neutral-700 underline underline-offset-4"
+                >
+                  Back to sign in
+                </button>
+              ) : mode === "password" ? (
                 <button
                   type="button"
                   onClick={() => switchMode("signup")}
@@ -266,15 +322,17 @@ export default function LoginPage() {
                 </button>
               )}
 
-              <button
-                type="button"
-                onClick={() => switchMode(mode === "magic" ? "password" : "magic")}
-                className="block w-full text-sm font-medium text-neutral-400 underline underline-offset-4"
-              >
-                {mode === "magic"
-                  ? "Use a password instead"
-                  : "Email me a magic link instead"}
-              </button>
+              {mode !== "forgot" && (
+                <button
+                  type="button"
+                  onClick={() => switchMode(mode === "magic" ? "password" : "magic")}
+                  className="block w-full text-sm font-medium text-neutral-400 underline underline-offset-4"
+                >
+                  {mode === "magic"
+                    ? "Use a password instead"
+                    : "Email me a magic link instead"}
+                </button>
+              )}
             </div>
           </form>
         )}

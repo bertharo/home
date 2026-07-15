@@ -3,8 +3,8 @@ import { createClient } from "@/lib/supabase/server";
 import { isAllowedEmail } from "@/lib/auth";
 
 /**
- * Magic-link callback. Exchanges the PKCE code for a session, then enforces
- * the two-user allowlist (defense-in-depth on top of shouldCreateUser:false).
+ * Auth callback. Exchanges the PKCE code for a session (magic link, signup
+ * confirmation, password recovery), then redirects to `next`.
  */
 export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url);

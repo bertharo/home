@@ -6,6 +6,7 @@ const PUBLIC_PATHS = [
   "/join",
   "/auth/callback",
   "/auth/auth-code-error",
+  "/auth/reset-password",
 ];
 
 /**
