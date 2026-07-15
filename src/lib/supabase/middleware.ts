@@ -49,6 +49,13 @@ export async function updateSession(request: NextRequest) {
 
   if (!user && !isPublic) {
     const url = request.nextUrl.clone();
+    // Logged-out visitors to the root land on the marketing page; deeper
+    // protected routes go to sign in (so they can return after auth).
+    if (pathname === "/") {
+      url.pathname = "/landing/";
+      url.search = "";
+      return NextResponse.redirect(url);
+    }
     url.pathname = "/login";
     url.searchParams.set("redirectedFrom", pathname);
     return NextResponse.redirect(url);
