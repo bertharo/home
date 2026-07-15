@@ -28,8 +28,9 @@ export const config = {
      * Match all request paths except:
      * - _next/static, _next/image (build assets)
      * - favicon / icons / manifest / service worker
+     * - landing (the static marketing page in public/landing)
      * - image files
      */
-    "/((?!_next/static|_next/image|favicon.ico|manifest.webmanifest|sw.js|icon|apple-icon|icons/|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)",
+    "/((?!_next/static|_next/image|favicon.ico|manifest.webmanifest|sw.js|icon|apple-icon|icons/|landing|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)",
   ],
 };
