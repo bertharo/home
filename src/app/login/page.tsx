@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { APP_NAME } from "@/lib/constants";
+import { resolveSiteUrl } from "@/lib/env";
 import { Home, Loader2, MailCheck } from "lucide-react";
 
 type Mode = "password" | "signup" | "magic";
@@ -70,7 +71,7 @@ export default function LoginPage() {
     setMessage(null);
 
     const supabase = createClient();
-    const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? window.location.origin;
+    const siteUrl = resolveSiteUrl(window.location.origin);
     const next = nextTarget();
 
     const { data, error } = await supabase.auth.signUp({
@@ -102,7 +103,7 @@ export default function LoginPage() {
     setMessage(null);
 
     const supabase = createClient();
-    const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? window.location.origin;
+    const siteUrl = resolveSiteUrl(window.location.origin);
     const next = nextTarget();
 
     const { error } = await supabase.auth.signInWithOtp({

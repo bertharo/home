@@ -13,3 +13,14 @@ export function supabaseConfigured() {
       !key.includes("placeholder"),
   );
 }
+
+/**
+ * The app's base URL, with any trailing slash(es) stripped so callers can
+ * safely append paths like `/auth/callback` without producing `//auth/...`.
+ * Falls back to the provided value (e.g. the browser origin) when
+ * NEXT_PUBLIC_SITE_URL is unset.
+ */
+export function resolveSiteUrl(fallback = ""): string {
+  const raw = process.env.NEXT_PUBLIC_SITE_URL || fallback;
+  return raw.replace(/\/+$/, "");
+}

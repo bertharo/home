@@ -1,5 +1,6 @@
 import { google } from "googleapis";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { resolveSiteUrl } from "@/lib/env";
 import type { CalendarEvent, Profile } from "@/lib/types";
 
 export const GOOGLE_SCOPES = [
@@ -17,7 +18,7 @@ export function googleConfigured() {
 }
 
 function siteUrl() {
-  return process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000";
+  return resolveSiteUrl("http://localhost:3000");
 }
 
 export function oauthClient() {
