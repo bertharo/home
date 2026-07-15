@@ -2,6 +2,7 @@
 
 import { useRef, useState, useTransition } from "react";
 import { Check, Pencil, Trash2, CalendarClock } from "lucide-react";
+import { format, parseISO } from "date-fns";
 import { cn } from "@/lib/utils";
 import { Modal } from "@/components/ui/Modal";
 import { Label, Input, Textarea, Button } from "@/components/ui/form";
@@ -25,7 +26,12 @@ function dueMeta(due: string | null) {
         : diff === -1
           ? "Yesterday"
           : date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
-  return { label, overdue: diff < 0 };
+  return { label, overdue: diff < 0, date };
+}
+
+function formatDueFull(due: string) {
+  const [y, m, d] = due.split("-").map(Number);
+  return format(new Date(y, m - 1, d), "EEEE, MMMM d, yyyy");
 }
 
 export function TodoRow({
@@ -36,7 +42,7 @@ export function TodoRow({
   profiles: Profile[];
 }) {
   const [pending, start] = useTransition();
-  const [editing, setEditing] = useState(false);
+  const [modal, setModal] = useState<"view" | "edit" | null>(null);
   const formRef = useRef<HTMLFormElement>(null);
 
   const done = todo.status === "done";
@@ -48,6 +54,10 @@ export function TodoRow({
     ? "both"
     : (todo.assignee_id ?? "");
 
+  function closeModal() {
+    setModal(null);
+  }
+
   function onToggle() {
     start(() => toggleTodo(todo.id, !done));
   }
@@ -55,14 +65,14 @@ export function TodoRow({
   function onSave(fd: FormData) {
     start(async () => {
       await updateTodo(todo.id, fd);
-      setEditing(false);
+      closeModal();
     });
   }
 
   function onDelete() {
     start(async () => {
       await deleteTodo(todo.id);
-      setEditing(false);
+      closeModal();
     });
   }
 
@@ -88,7 +98,11 @@ export function TodoRow({
           <Check className="h-3.5 w-3.5" strokeWidth={3} />
         </button>
 
-        <div className="min-w-0 flex-1">
+        <button
+          type="button"
+          onClick={() => setModal("view")}
+          className="min-w-0 flex-1 text-left"
+        >
           <p
             className={cn(
               "text-[15px] leading-snug text-neutral-900",
@@ -136,11 +150,11 @@ export function TodoRow({
               </span>
             )}
           </div>
-        </div>
+        </button>
 
         <div className="flex shrink-0 items-center gap-0.5">
           <button
-            onClick={() => setEditing(true)}
+            onClick={() => setModal("edit")}
             className="flex h-8 w-8 items-center justify-center rounded-lg text-neutral-300 transition hover:bg-neutral-100 hover:text-neutral-600"
             aria-label="Edit"
           >
@@ -149,7 +163,142 @@ export function TodoRow({
         </div>
       </div>
 
-      <Modal open={editing} onClose={() => setEditing(false)} title="Edit to-do">
+      <Modal
+        open={modal === "view"}
+        onClose={closeModal}
+        title="To-do"
+      >
+        <div className="max-h-[70vh] space-y-4 overflow-y-auto pr-1">
+          <div>
+            <p
+              className={cn(
+                "text-lg font-semibold leading-snug text-neutral-900",
+                done && "text-neutral-400 line-through",
+              )}
+            >
+              {todo.title}
+            </p>
+            <span
+              className={cn(
+                "mt-2 inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium",
+                done
+                  ? "bg-emerald-50 text-emerald-700"
+                  : "bg-neutral-100 text-neutral-600",
+              )}
+            >
+              {done ? "Completed" : "Open"}
+            </span>
+          </div>
+
+          <div>
+            <p className="mb-1 text-xs font-medium uppercase tracking-wide text-neutral-400">
+              Notes
+            </p>
+            {todo.notes ? (
+              <p className="whitespace-pre-wrap text-sm leading-relaxed text-neutral-700">
+                {todo.notes}
+              </p>
+            ) : (
+              <p className="text-sm text-neutral-400">No notes</p>
+            )}
+          </div>
+
+          <dl className="space-y-3 text-sm">
+            <div>
+              <dt className="text-xs font-medium uppercase tracking-wide text-neutral-400">
+                Assignee
+              </dt>
+              <dd className="mt-1 text-neutral-800">
+                {todo.for_both ? (
+                  "Both"
+                ) : assignee ? (
+                  <span className="inline-flex items-center gap-1.5">
+                    <Avatar
+                      name={assignee.display_name}
+                      color={assignee.color}
+                      size="xs"
+                    />
+                    {assignee.display_name}
+                  </span>
+                ) : (
+                  "Unassigned"
+                )}
+              </dd>
+            </div>
+
+            {todo.due_date && due && (
+              <div>
+                <dt className="text-xs font-medium uppercase tracking-wide text-neutral-400">
+                  Due
+                </dt>
+                <dd
+                  className={cn(
+                    "mt-1",
+                    due.overdue && !done
+                      ? "font-medium text-red-600"
+                      : "text-neutral-800",
+                  )}
+                >
+                  {formatDueFull(todo.due_date)}
+                  <span className="ml-1.5 text-neutral-400">({due.label})</span>
+                </dd>
+              </div>
+            )}
+
+            {creator && (
+              <div>
+                <dt className="text-xs font-medium uppercase tracking-wide text-neutral-400">
+                  Created
+                </dt>
+                <dd className="mt-1 text-neutral-800">
+                  by {creator.display_name}
+                  <span className="text-neutral-400">
+                    {" "}
+                    · {format(parseISO(todo.created_at), "MMM d, yyyy")}
+                  </span>
+                </dd>
+              </div>
+            )}
+
+            {done && todo.completed_at && (
+              <div>
+                <dt className="text-xs font-medium uppercase tracking-wide text-neutral-400">
+                  Completed
+                </dt>
+                <dd className="mt-1 text-neutral-800">
+                  {format(parseISO(todo.completed_at), "MMM d, yyyy · h:mm a")}
+                </dd>
+              </div>
+            )}
+          </dl>
+
+          <div className="flex gap-2 border-t border-neutral-100 pt-4">
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={pending}
+              onClick={() => {
+                start(async () => {
+                  await toggleTodo(todo.id, !done);
+                });
+              }}
+              className="flex-1"
+            >
+              {done ? "Mark open" : "Mark done"}
+            </Button>
+            <Button
+              type="button"
+              disabled={pending}
+              onClick={() => setModal("edit")}
+              className="flex-1"
+            >
+              Edit
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal open={modal === "edit"} onClose={closeModal} title="Edit to-do">
         <form ref={formRef} action={onSave} className="space-y-4">
           <div>
             <Label htmlFor={`t-${todo.id}`}>Title</Label>
