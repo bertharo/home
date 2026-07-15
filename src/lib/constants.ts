@@ -12,7 +12,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 
-export const APP_NAME = "Home";
+export const APP_NAME = "Mi Casita";
 
 export type NavItem = {
   href: string;
