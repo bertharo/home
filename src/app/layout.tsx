@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import { Analytics } from '@vercel/analytics/next';
 import "./globals.css";
 import { APP_NAME } from "@/lib/constants";
 
@@ -46,6 +47,7 @@ export default function RootLayout({
     >
       <body className="min-h-dvh bg-neutral-50 text-neutral-900">
         {children}
+        <Analytics />
       </body>
     </html>
   );
