@@ -17,7 +17,13 @@ export function MobileTopBar({ me }: { me: Profile | null }) {
       </Link>
       {me && (
         <div className="flex items-center gap-1.5">
-          <Avatar name={me.display_name} color={me.color} size="sm" />
+          <Link
+            href="/household"
+            className="rounded-full transition active:opacity-70"
+            aria-label="Household settings"
+          >
+            <Avatar name={me.display_name} color={me.color} size="sm" />
+          </Link>
           <form action={signOut}>
             <button
               type="submit"
