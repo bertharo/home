@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import { Check, Copy, LogOut, Mail, Plus, Trash2 } from "lucide-react";
 import { Avatar } from "@/components/ui/Avatar";
+import { resolveSiteUrl } from "@/lib/env";
 import type { Household, Invite, Profile } from "@/lib/types";
 import {
   createInvite,
@@ -12,8 +13,11 @@ import {
 } from "@/lib/actions/household";
 
 function inviteUrl(token: string) {
-  if (typeof window === "undefined") return `/join/${token}`;
-  return `${window.location.origin}/join/${token}`;
+  const base =
+    typeof window === "undefined"
+      ? resolveSiteUrl("")
+      : resolveSiteUrl(window.location.origin);
+  return `${base}/join/${token}`;
 }
 
 export function HouseholdManager({
