@@ -8,7 +8,7 @@ import {
   parseISO,
 } from "date-fns";
 import { getHousehold } from "@/lib/auth";
-import { getHouseholdTimezone, parseLocalDateKey, formatDateKey } from "@/lib/timezone";
+import { parseLocalDateKey, formatDateKey } from "@/lib/timezone";
 import {
   fetchHouseholdEventsDetailed,
   connectedUserIds,
@@ -53,7 +53,9 @@ export default async function CalendarPage({
   const profileIds = all.map((p) => p.id);
 
   const [{ events, syncErrors }, connectedIds] = await Promise.all([
-    fetchHouseholdEventsDetailed(all, rangeStart, rangeEnd),
+    fetchHouseholdEventsDetailed(all, rangeStart, rangeEnd, {
+      skipCache: true,
+    }),
     connectedUserIds(profileIds),
   ]);
 

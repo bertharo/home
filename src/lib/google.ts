@@ -164,8 +164,16 @@ export async function fetchHouseholdEventsDetailed(
   profiles: Profile[],
   timeMin: Date,
   timeMax: Date,
+  options?: { skipCache?: boolean },
 ): Promise<HouseholdEventsResult> {
   if (!googleConfigured()) return { events: [], syncErrors: [] };
+
+  const load = () => fetchHouseholdEventsInner(profiles, timeMin, timeMax);
+
+  if (options?.skipCache) {
+    const result = await load();
+    return { events: result.events, syncErrors: result.syncErrors };
+  }
 
   const cacheKey = [
     "household-events",

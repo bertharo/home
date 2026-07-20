@@ -4,6 +4,7 @@ import { DesktopSidebar } from "@/components/nav/DesktopSidebar";
 import { MobileTopBar } from "@/components/nav/MobileTopBar";
 import { BottomNav } from "@/components/nav/BottomNav";
 import { ServiceWorkerRegister } from "@/components/ServiceWorkerRegister";
+import { CalendarAutoSync } from "@/app/(app)/calendar/CalendarAutoSync";
 
 export default async function AppLayout({
   children,
@@ -26,6 +27,7 @@ export default async function AppLayout({
         </main>
       </div>
       <BottomNav />
+      <CalendarAutoSync />
       <ServiceWorkerRegister />
     </div>
   );
