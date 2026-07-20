@@ -8,9 +8,9 @@ import {
   parseISO,
 } from "date-fns";
 import { getHousehold } from "@/lib/auth";
-import { dateFromKey, formatDateKey } from "@/lib/timezone";
+import { getHouseholdTimezone, parseLocalDateKey, formatDateKey } from "@/lib/timezone";
 import {
-  fetchHouseholdEvents,
+  fetchHouseholdEventsDetailed,
   connectedUserIds,
   googleConfigured,
 } from "@/lib/google";
@@ -33,7 +33,7 @@ export default async function CalendarPage({
     sp.date && isValid(parseISO(sp.date))
       ? sp.date.slice(0, 10)
       : formatDateKey();
-  const refDate = dateFromKey(dateKey);
+  const refDate = parseLocalDateKey(dateKey);
 
   const { me, all } = await getHousehold();
 
@@ -50,9 +50,11 @@ export default async function CalendarPage({
     1,
   );
 
-  const [events, connectedIds] = await Promise.all([
-    fetchHouseholdEvents(all, rangeStart, rangeEnd),
-    connectedUserIds(),
+  const profileIds = all.map((p) => p.id);
+
+  const [{ events, syncErrors }, connectedIds] = await Promise.all([
+    fetchHouseholdEventsDetailed(all, rangeStart, rangeEnd),
+    connectedUserIds(profileIds),
   ]);
 
   const meConnected = me ? connectedIds.includes(me.id) : false;
@@ -66,6 +68,7 @@ export default async function CalendarPage({
         profiles={all}
         justConnected={sp.connected === "1"}
         error={sp.error ?? null}
+        syncErrors={syncErrors}
       />
       <CalendarView
         view={view}

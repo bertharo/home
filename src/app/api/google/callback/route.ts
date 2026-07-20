@@ -3,15 +3,20 @@ import { revalidateTag } from "next/cache";
 import { google } from "googleapis";
 import { getUser } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
+import { resolveSiteUrl } from "@/lib/env";
 import { oauthClient, HOUSEHOLD_EVENTS_TAG } from "@/lib/google";
+
+function appOrigin(requestOrigin: string) {
+  return resolveSiteUrl(requestOrigin);
+}
 
 export async function GET(request: Request) {
   const { origin, searchParams } = new URL(request.url);
   const code = searchParams.get("code");
 
   const user = await getUser();
-  if (!user) return NextResponse.redirect(`${origin}/login`);
-  if (!code) return NextResponse.redirect(`${origin}/calendar?error=oauth`);
+  if (!user) return NextResponse.redirect(`${appOrigin(origin)}/login`);
+  if (!code) return NextResponse.redirect(`${appOrigin(origin)}/calendar?error=oauth`);
 
   try {
     const client = oauthClient();
@@ -30,7 +35,7 @@ export async function GET(request: Request) {
 
     if (!tokens.refresh_token) {
       // Without a refresh token we can't sync long-term.
-      return NextResponse.redirect(`${origin}/calendar?error=no-refresh`);
+      return NextResponse.redirect(`${appOrigin(origin)}/calendar?error=no-refresh`);
     }
 
     const supabase = await createClient();
@@ -48,8 +53,8 @@ export async function GET(request: Request) {
     );
 
     revalidateTag(HOUSEHOLD_EVENTS_TAG, { expire: 0 });
-    return NextResponse.redirect(`${origin}/calendar?connected=1`);
+    return NextResponse.redirect(`${appOrigin(origin)}/calendar?connected=1`);
   } catch {
-    return NextResponse.redirect(`${origin}/calendar?error=oauth`);
+    return NextResponse.redirect(`${appOrigin(origin)}/calendar?error=oauth`);
   }
 }

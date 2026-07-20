@@ -65,6 +65,12 @@ export async function createCalendarEvent(formData: FormData) {
   return { ok: true };
 }
 
+export async function refreshCalendarSync() {
+  updateTag(HOUSEHOLD_EVENTS_TAG);
+  revalidatePath("/calendar");
+  revalidatePath("/");
+}
+
 export async function disconnectGoogle() {
   const supabase = await createClient();
   const {

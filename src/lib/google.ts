@@ -9,8 +9,19 @@ import type { CalendarEvent, Profile } from "@/lib/types";
  * member connects/disconnects Google or creates an event so changes appear
  * immediately instead of waiting out the TTL.
  */
+export type CalendarSyncError = {
+  profileId: string;
+  displayName: string;
+};
+
+export type HouseholdEventsResult = {
+  events: CalendarEvent[];
+  syncErrors: CalendarSyncError[];
+};
+
 export const HOUSEHOLD_EVENTS_TAG = "household-events";
 const EVENTS_CACHE_TTL_SECONDS = 60;
+const CALENDAR_SYNC_FAILED = "calendar-sync-failed";
 
 export const GOOGLE_SCOPES = [
   "https://www.googleapis.com/auth/calendar",
@@ -38,10 +49,43 @@ export function oauthClient() {
   );
 }
 
+async function persistTokens(
+  admin: ReturnType<typeof createAdminClient>,
+  userId: string,
+  tokens: {
+    access_token?: string | null;
+    refresh_token?: string | null;
+    expiry_date?: number | null;
+  },
+) {
+  const update: Record<string, unknown> = {
+    updated_at: new Date().toISOString(),
+  };
+  if (tokens.access_token) update.access_token = tokens.access_token;
+  if (tokens.refresh_token) update.refresh_token = tokens.refresh_token;
+  if (tokens.expiry_date)
+    update.expiry = new Date(tokens.expiry_date).toISOString();
+  await admin.from("google_accounts").update(update).eq("user_id", userId);
+}
+
+/** Refresh and persist access tokens before Google API calls. */
+async function ensureAccessToken(
+  client: ReturnType<typeof oauthClient>,
+  admin: ReturnType<typeof createAdminClient>,
+  userId: string,
+) {
+  const expiry = client.credentials.expiry_date;
+  if (expiry && expiry > Date.now() + 5 * 60_000) return;
+
+  const { credentials } = await client.refreshAccessToken();
+  client.setCredentials(credentials);
+  await persistTokens(admin, userId, credentials);
+}
+
 /**
  * Build an authorized OAuth2 client for a given user's stored tokens.
  * Persists refreshed access tokens back to the DB. Returns null if the user
- * hasn't connected Google.
+ * hasn't connected Google or tokens can't be refreshed.
  */
 async function authedClientFor(userId: string) {
   const admin = createAdminClient();
@@ -60,15 +104,16 @@ async function authedClientFor(userId: string) {
     expiry_date: new Date(account.expiry).getTime(),
   });
 
-  // Persist rotated tokens so we don't repeatedly refresh.
+  // Persist rotated tokens from automatic refresh during API calls.
   client.on("tokens", async (tokens) => {
-    const update: Record<string, unknown> = { updated_at: new Date().toISOString() };
-    if (tokens.access_token) update.access_token = tokens.access_token;
-    if (tokens.refresh_token) update.refresh_token = tokens.refresh_token;
-    if (tokens.expiry_date)
-      update.expiry = new Date(tokens.expiry_date).toISOString();
-    await admin.from("google_accounts").update(update).eq("user_id", userId);
+    await persistTokens(admin, userId, tokens);
   });
+
+  try {
+    await ensureAccessToken(client, admin, userId);
+  } catch {
+    throw new Error("google-token-refresh-failed");
+  }
 
   return { client, account };
 }
@@ -80,7 +125,7 @@ async function authedClientFor(userId: string) {
  * whose fetch times out simply contributes no events — identical to the
  * existing behaviour when a member's fetch throws.
  */
-const EVENT_FETCH_TIMEOUT_MS = 8000;
+const EVENT_FETCH_TIMEOUT_MS = 12_000;
 
 function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   return new Promise<T>((resolve, reject) => {
@@ -102,27 +147,25 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
 }
 
 /** Which household members have connected Google. */
-export async function connectedUserIds(): Promise<string[]> {
+export async function connectedUserIds(
+  householdProfileIds?: string[],
+): Promise<string[]> {
   const admin = createAdminClient();
   const { data } = await admin.from("google_accounts").select("user_id");
-  return (data ?? []).map((r) => r.user_id as string);
+  let ids = (data ?? []).map((r) => r.user_id as string);
+  if (householdProfileIds?.length) {
+    const allowed = new Set(householdProfileIds);
+    ids = ids.filter((id) => allowed.has(id));
+  }
+  return ids;
 }
 
-/**
- * Fetch and merge calendar events for every connected household member
- * within [timeMin, timeMax]. Color-coded by owner profile.
- *
- * Cached for a short window (keyed by member identity + range) so passive
- * dashboard/calendar re-renders — e.g. the full-page revalidation triggered by
- * toggling a todo — reuse events instead of re-hitting Google every time.
- * Event mutations and connect/disconnect bust the cache via HOUSEHOLD_EVENTS_TAG.
- */
-export async function fetchHouseholdEvents(
+export async function fetchHouseholdEventsDetailed(
   profiles: Profile[],
   timeMin: Date,
   timeMax: Date,
-): Promise<CalendarEvent[]> {
-  if (!googleConfigured()) return [];
+): Promise<HouseholdEventsResult> {
+  if (!googleConfigured()) return { events: [], syncErrors: [] };
 
   const cacheKey = [
     "household-events",
@@ -134,30 +177,82 @@ export async function fetchHouseholdEvents(
     timeMax.toISOString(),
   ];
 
+  const load = () => fetchHouseholdEventsInner(profiles, timeMin, timeMax);
+
   const cached = unstable_cache(
-    () => fetchHouseholdEventsUncached(profiles, timeMin, timeMax),
+    async () => {
+      const result = await load();
+      if (!result.cacheable) throw new Error(CALENDAR_SYNC_FAILED);
+      return result;
+    },
     cacheKey,
     { revalidate: EVENTS_CACHE_TTL_SECONDS, tags: [HOUSEHOLD_EVENTS_TAG] },
   );
 
-  return cached();
+  try {
+    const result = await cached();
+    return { events: result.events, syncErrors: result.syncErrors };
+  } catch (err) {
+    if (err instanceof Error && err.message === CALENDAR_SYNC_FAILED) {
+      const result = await load();
+      return { events: result.events, syncErrors: result.syncErrors };
+    }
+    throw err;
+  }
 }
 
-async function fetchHouseholdEventsUncached(
+/**
+ * Fetch and merge calendar events for every connected household member
+ * within [timeMin, timeMax]. Color-coded by owner profile.
+ *
+ * Cached for a short window (keyed by member identity + range) so passive
+ * dashboard/calendar re-renders — e.g. the full-page revalidation triggered by
+ * toggling a todo — reuse events instead of re-hitting Google every time.
+ * Failed syncs are not cached so the next load can retry.
+ * Event mutations and connect/disconnect bust the cache via HOUSEHOLD_EVENTS_TAG.
+ */
+export async function fetchHouseholdEvents(
   profiles: Profile[],
   timeMin: Date,
   timeMax: Date,
 ): Promise<CalendarEvent[]> {
+  const { events } = await fetchHouseholdEventsDetailed(
+    profiles,
+    timeMin,
+    timeMax,
+  );
+  return events;
+}
+
+async function fetchHouseholdEventsInner(
+  profiles: Profile[],
+  timeMin: Date,
+  timeMax: Date,
+): Promise<{
+  events: CalendarEvent[];
+  syncErrors: CalendarSyncError[];
+  cacheable: boolean;
+}> {
   const results: CalendarEvent[] = [];
+  const syncErrors: CalendarSyncError[] = [];
 
   await Promise.all(
     profiles.map(async (profile) => {
+      let authed: Awaited<ReturnType<typeof authedClientFor>> | null = null;
+      try {
+        authed = await authedClientFor(profile.id);
+      } catch {
+        syncErrors.push({
+          profileId: profile.id,
+          displayName: profile.display_name,
+        });
+        return;
+      }
+      if (!authed) return;
+
       try {
         await withTimeout(
           (async () => {
-            const authed = await authedClientFor(profile.id);
-            if (!authed) return;
-
             const calendar = google.calendar({
               version: "v3",
               auth: authed.client,
@@ -196,16 +291,22 @@ async function fetchHouseholdEventsUncached(
               });
             }
           })(),
-          EVENT_FETCH_TIMEOUT_MS + 1000,
+          EVENT_FETCH_TIMEOUT_MS + 2000,
         );
       } catch {
-        // A single member's fetch failing or timing out shouldn't break the
-        // whole view — that member simply contributes no events.
+        syncErrors.push({
+          profileId: profile.id,
+          displayName: profile.display_name,
+        });
       }
     }),
   );
 
-  return results;
+  return {
+    events: results,
+    syncErrors,
+    cacheable: syncErrors.length === 0,
+  };
 }
 
 type NewEvent = {

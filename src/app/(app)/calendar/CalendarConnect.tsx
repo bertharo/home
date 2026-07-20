@@ -3,7 +3,8 @@
 import { useTransition } from "react";
 import { Calendar, Check, AlertCircle, Link2Off } from "lucide-react";
 import { Avatar } from "@/components/ui/Avatar";
-import { disconnectGoogle } from "./actions";
+import { disconnectGoogle, refreshCalendarSync } from "./actions";
+import type { CalendarSyncError } from "@/lib/google";
 import type { Profile } from "@/lib/types";
 
 export function CalendarConnect({
@@ -13,6 +14,7 @@ export function CalendarConnect({
   profiles,
   justConnected,
   error,
+  syncErrors,
 }: {
   configured: boolean;
   meConnected: boolean;
@@ -20,6 +22,7 @@ export function CalendarConnect({
   profiles: Profile[];
   justConnected: boolean;
   error: string | null;
+  syncErrors: CalendarSyncError[];
 }) {
   const [pending, start] = useTransition();
 
@@ -113,6 +116,23 @@ export function CalendarConnect({
       )}
       {errorMessage && (
         <p className="mt-2 text-xs text-red-600">{errorMessage}</p>
+      )}
+      {syncErrors.length > 0 && (
+        <div className="mt-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+          <p className="font-medium">Couldn&apos;t sync some calendars</p>
+          <p className="mt-0.5">
+            {syncErrors.map((e) => e.displayName).join(", ")} — try refreshing
+            or disconnect and reconnect Google Calendar.
+          </p>
+          <button
+            type="button"
+            onClick={() => start(() => refreshCalendarSync())}
+            disabled={pending}
+            className="mt-2 font-medium text-amber-900 underline underline-offset-2"
+          >
+            Refresh sync
+          </button>
+        </div>
       )}
     </div>
   );
