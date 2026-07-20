@@ -185,8 +185,6 @@ export async function fetchHouseholdEventsDetailed(
     timeMax.toISOString(),
   ];
 
-  const load = () => fetchHouseholdEventsInner(profiles, timeMin, timeMax);
-
   const cached = unstable_cache(
     async () => {
       const result = await load();
